@@ -49,9 +49,9 @@ export class Store {
   private listeners = new Set<() => void>();
   private persistence: Persistence;
 
-  constructor(persistence: Persistence) {
+  constructor(persistence: Persistence, initial: () => AppState = seedState) {
     this.persistence = persistence;
-    this.state = persistence.load() ?? seedState();
+    this.state = persistence.load() ?? initial();
     persistence.save(this.state);
   }
 
@@ -353,6 +353,12 @@ export class Store {
       else d.users.push(u);
       this.log(d, userId, 'Usuario', `${i >= 0 ? 'Editar' : 'Crear'} ${u.name}`);
     });
+  }
+
+  /** Reemplaza todos los datos (cargar demo o empezar de cero). Solo administración. */
+  replaceAll(userId: string, next: AppState) {
+    this.requireAdmin(userId);
+    this.commit((d) => Object.assign(d, next));
   }
 
   // ---------- Respaldo ----------

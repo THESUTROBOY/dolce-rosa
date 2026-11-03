@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { demoState } from './domain/demo';
 import { DomainError, localPersistence, Store } from './domain/store';
 import type { AppState, User } from './domain/types';
 
-const store = new Store(localPersistence());
+const store = new Store(localPersistence('dolce-rosa:demo-v2'), () => demoState());
 const StoreCtx = createContext(store);
 
 interface Session {

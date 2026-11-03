@@ -107,3 +107,21 @@ describe('flujo de venta y caja', () => {
     expect(() => s.saveProduct(cajero.id, { ...p, price: 1 })).toThrow(/administrador/);
   });
 });
+
+describe('datos de prueba', () => {
+  it('genera un mes de ventas consistente', async () => {
+    const { demoState } = await import('./demo');
+    const { amountDue, paidSoFar } = await import('./calc');
+    const now = new Date('2026-11-03T16:30:00');
+    const s = demoState(now);
+    const paid = s.orders.filter((o) => o.status === 'pagado');
+    expect(paid.length).toBeGreaterThan(600);
+    for (const o of paid) expect(paidSoFar(o)).toBe(amountDue(o));
+    expect(s.shifts.filter((x) => !x.closedAt)).toHaveLength(1);
+    expect(s.orders.filter((o) => o.status === 'abierto')).toHaveLength(3);
+    const store = new Store(memoryPersistence(), () => s);
+    for (const sh of store.get().shifts.filter((x) => x.closedAt))
+      expect(sh.expectedCash).toBe(expectedCash(store.get(), sh));
+    expect(store.login('1111').name).toBe('Camila');
+  });
+});

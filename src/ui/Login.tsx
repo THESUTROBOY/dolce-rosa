@@ -58,7 +58,7 @@ export function Login() {
             </button>
           </div>
         </form>
-        <p className="muted small">Demo: administración 1234 · caja 0000</p>
+        <p className="muted small">PIN de prueba: Administración 1234 · Camila 1111 · Nico 2222</p>
       </div>
     </div>
   );

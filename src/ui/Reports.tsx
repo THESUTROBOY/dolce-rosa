@@ -3,7 +3,7 @@ import { buildReport, clp, dayKey, netAndTax, saleTotal } from '../domain/calc';
 import { useAppState } from '../state';
 import { downloadFile, Empty, toCsv } from './common';
 
-type Preset = 'hoy' | 'semana' | 'mes' | 'rango';
+type Preset = 'hoy' | 'semana' | 'mes' | '30d' | 'rango';
 
 function startOfDay(d: Date) {
   const x = new Date(d);
@@ -20,6 +20,11 @@ function rangeFor(p: Preset, from: string, to: string): [Date, Date] {
     const mon = new Date(today);
     mon.setDate(today.getDate() - ((today.getDay() + 6) % 7));
     return [mon, tomorrow];
+  }
+  if (p === '30d') {
+    const f = new Date(today);
+    f.setDate(today.getDate() - 29);
+    return [f, tomorrow];
   }
   if (p === 'mes') return [new Date(today.getFullYear(), today.getMonth(), 1), tomorrow];
   const f = from ? new Date(from + 'T00:00') : today;
@@ -84,9 +89,9 @@ export function Reports() {
       <div className="page-head">
         <h1>Reportes</h1>
         <div className="seg">
-          {(['hoy', 'semana', 'mes', 'rango'] as Preset[]).map((p) => (
+          {(['hoy', 'semana', 'mes', '30d', 'rango'] as Preset[]).map((p) => (
             <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>
-              {{ hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', rango: 'Rango' }[p]}
+              {{ hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', '30d': 'Últimos 30 días', rango: 'Rango' }[p]}
             </button>
           ))}
         </div>

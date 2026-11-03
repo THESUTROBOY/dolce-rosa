@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { demoState } from '../domain/demo';
+import { seedState } from '../domain/seed';
 import { uid } from '../domain/store';
 import type { Role, Settings as S, TableDef, User } from '../domain/types';
 import { CASH } from '../domain/types';
@@ -14,6 +16,7 @@ export function Settings() {
   const [methods, setMethods] = useState(state.settings.paymentMethods.join(', '));
   const [tables, setTables] = useState<TableDef[]>(state.tables);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [confirming, setConfirming] = useState<'demo' | 'vacio' | null>(null);
 
   const saveSettings = () => {
     const list = methods
@@ -135,6 +138,37 @@ export function Settings() {
               />
             </label>
           </div>
+        </div>
+        <div className="card">
+          <h2>Datos de prueba</h2>
+          <p className="muted small">
+            Vuelve a cargar el mes de ventas de ejemplo, o deja la app vacía (solo carta y usuarios) para partir de verdad. Esto reemplaza todo lo
+            que hay en este equipo.
+          </p>
+          {confirming ? (
+            <div className="btn-row">
+              <span>¿Seguro? Se pierden los datos actuales.</span>
+              <button
+                className="danger"
+                onClick={() => {
+                  run(() => store.replaceAll(user!.id, confirming === 'demo' ? demoState() : seedState()), confirming === 'demo' ? 'Datos de prueba cargados' : 'App vacía');
+                  setConfirming(null);
+                }}
+              >
+                Sí, reemplazar
+              </button>
+              <button className="ghost" onClick={() => setConfirming(null)}>
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <div className="btn-row">
+              <button onClick={() => setConfirming('demo')}>Cargar datos de prueba</button>
+              <button className="danger-ghost" onClick={() => setConfirming('vacio')}>
+                Empezar desde cero
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
