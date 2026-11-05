@@ -414,6 +414,48 @@ button:disabled {
   text-decoration: none;
   white-space: nowrap;
 }
+.chip.on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.chips-wrap.pick .chip {
+  min-height: 42px;
+  padding: 8px 16px;
+}
+.chip-x span {
+  margin-left: 6px;
+  color: var(--danger);
+  font-weight: 700;
+}
+.legend-row {
+  display: flex !important;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+.scoop + .scoop {
+  margin-top: 10px;
+}
+.scoop-n {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.scoop-other {
+  margin-top: 8px;
+  width: 100%;
+}
+.flavor-edit .field-row {
+  margin-top: 10px;
+}
+.tk-choice {
+  font-size: 15px;
+  font-weight: 600;
+}
 .chips-wrap {
   display: flex;
   flex-wrap: wrap;
@@ -2066,4 +2108,23 @@ button:disabled {
     border-color: var(--brand);
     outline: 2px solid var(--brand-soft);
   }
+}
+
+.choice-edit {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.6fr) 1.4fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.flavors-admin {
+  margin-top: 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.flavors-admin summary {
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 28px;
 }

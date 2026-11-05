@@ -1,4 +1,4 @@
-import { dayKey, folioLabel, occupiesTable, turnoOf } from './calc';
+import { dayKey, folioLabel, occupiesTable, scoopsFor, turnoOf } from './calc';
 import { seedState } from './seed';
 import type { Account, AppState, Category, Comanda, ComandaStatus, Line, Product, Settings, Station, TableDef } from './types';
 
@@ -59,6 +59,10 @@ export interface NewLine {
   productId: string;
   variant?: string;
   extras: string[];
+  /** Grupo → opción elegida. */
+  choices?: Record<string, string>;
+  /** Un sabor por bola de helado (incluidas + extras). */
+  flavors?: string[];
   qty: number;
   note: string;
 }
@@ -137,12 +141,23 @@ export class Store {
       if (!x) throw new DomainError(`Extra no válido: ${e}`);
       return s + x.price;
     }, 0);
+    const choices: string[] = [];
+    for (const g of p.choices ?? []) {
+      const v = l.choices?.[g.name];
+      if (!v || !g.options.includes(v)) throw new DomainError(`Elige ${g.name.toLowerCase()}`);
+      choices.push(/^(con|sin) /i.test(v) ? v : `${g.name} ${v.toLowerCase()}`);
+    }
+    const scoops = scoopsFor(p, l.extras);
+    const flavors = (l.flavors ?? []).map((f) => f.trim()).filter(Boolean);
+    if (flavors.length < scoops) throw new DomainError(scoops === 1 ? 'Elige el sabor del helado' : `Elige los ${scoops} sabores de helado`);
+    if (scoops) choices.push(`Helado ${flavors.slice(0, scoops).map((f) => f.toLowerCase()).join(' y ')}`);
     const line: Line = {
       id: uid('lin'),
       productId: p.id,
       name: p.name,
       variant: variant?.name,
       extras: l.extras,
+      choices: choices.length ? choices : undefined,
       unitPrice: (variant?.price ?? p.price) + extrasPrice,
       qty: l.qty,
       note: l.note.trim(),
@@ -227,7 +242,7 @@ export class Store {
           accountId: acc.id,
           tableName: acc.tableName,
           station,
-          items: lines.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, qty: l.qty, note: l.note })),
+          items: lines.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, choices: l.choices, qty: l.qty, note: l.note })),
           createdAt: this.iso(),
           status: 'pendiente',
           updatedAt: this.iso(),
@@ -442,6 +457,14 @@ export class Store {
     if (new Set(clean.map((t) => t.name.toLowerCase())).size !== clean.length) throw new DomainError('Hay mesas con el mismo nombre');
     this.commit((d) => {
       d.tables = clean;
+    });
+  }
+
+  /** Sabores de helado del día: no pide PIN, para que quien vea que se acabó lo saque. */
+  setFlavors(flavors: string[]) {
+    const clean = [...new Set(flavors.map((f) => f.trim()).filter(Boolean))];
+    this.commit((d) => {
+      d.settings.iceCreamFlavors = clean;
     });
   }
 

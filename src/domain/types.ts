@@ -21,6 +21,12 @@ export interface Option {
   price: number;
 }
 
+/** Grupo de opciones sin costo donde se elige una, ej. Salsa: chocolate, caramelo… */
+export interface ChoiceGroup {
+  name: string;
+  options: string[];
+}
+
 export interface Product {
   id: string;
   categoryId: string;
@@ -30,6 +36,10 @@ export interface Product {
   price: number;
   variants: Option[];
   extras: Option[];
+  /** Opciones incluidas que hay que elegir (salsa, topping, crema, fruta). */
+  choices?: ChoiceGroup[];
+  /** Bolas de helado incluidas; el sabor se elige al pedir. */
+  scoops?: number;
   soldOut: boolean;
   archived: boolean;
 }
@@ -40,6 +50,8 @@ export interface Line {
   name: string;
   variant?: string;
   extras: string[];
+  /** Lo elegido sin costo, ya escrito: "Salsa chocolate", "Helado lúcuma". */
+  choices?: string[];
   unitPrice: number;
   qty: number;
   note: string;
@@ -84,6 +96,7 @@ export interface ComandaItem {
   name: string;
   variant?: string;
   extras: string[];
+  choices?: string[];
   qty: number;
   note: string;
 }
@@ -117,6 +130,8 @@ export interface Settings {
   adminPin: string;
   /** Abrir la impresión del detalle apenas se emite (por defecto sí). */
   printOnEmit?: boolean;
+  /** Sabores de helado disponibles hoy. Cualquiera los agrega o quita cuando se acaban. */
+  iceCreamFlavors?: string[];
 }
 
 export interface AuditEntry {

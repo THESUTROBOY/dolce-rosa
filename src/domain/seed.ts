@@ -1,4 +1,4 @@
-import type { AppState, Category, Option, Product } from './types';
+import type { AppState, Category, ChoiceGroup, Option, Product } from './types';
 
 /** Carta oficial de Dolce Rosa (PDF de mayo 2026) y configuración inicial. */
 export function seedState(): AppState {
@@ -27,6 +27,11 @@ export function seedState(): AppState {
     { name: 'Crema chantilly', price: 700 },
   ];
   const helado: Option[] = [{ name: 'Bola de helado extra', price: 990 }];
+  const salsa: ChoiceGroup = { name: 'Salsa', options: ['Chocolate', 'Caramelo', 'Frambuesa', 'Manjar'] };
+  const topping: ChoiceGroup = { name: 'Topping', options: ['Chubi', 'Oreo', 'Malvas', 'Chips de colores'] };
+  const crema: ChoiceGroup = { name: 'Crema', options: ['Con crema', 'Sin crema'] };
+  const fruta: ChoiceGroup = { name: 'Fruta', options: ['Frutilla', 'Plátano'] };
+  const waffle = [fruta, crema, salsa, topping];
   const desayunoBebida = (base: number): Option[] => ['Té negro', 'Cappuccino', 'Latte', 'Americano'].map((name) => ({ name, price: base }));
   const desmechado = (base: number): Option[] => [
     { name: 'Vacuno', price: base },
@@ -82,23 +87,23 @@ export function seedState(): AppState {
     p(pasteleria.id, 'Pie de limón', 3890),
     p(pasteleria.id, 'Brazo de reina', 2490),
     p(pasteleria.id, 'Brownie', 3290),
-    p(pasteleria.id, 'Brownie con helado', 4290),
+    p(pasteleria.id, 'Brownie con helado', 4290, { scoops: 1 }),
     p(saludable.id, 'Chilenitos', 2000),
     p(saludable.id, 'Rollitos de canela', 2000),
     p(saludable.id, 'Mendocino', 2000),
     p(saludable.id, 'Cheesecake saludable', 4490),
     p(saludable.id, 'Kuchen saludable', 4490),
-    p(helados.id, 'Copa simple', 3290, { description: 'Una bola de helado, crema chantilly, salsa y topping' }),
-    p(helados.id, 'Copa doble', 4290, { description: 'Dos bolas de helado, crema chantilly, salsa y topping' }),
+    p(helados.id, 'Copa simple', 3290, { description: 'Una bola de helado, crema chantilly, salsa y topping', scoops: 1, choices: [crema, salsa, topping] }),
+    p(helados.id, 'Copa doble', 4290, { description: 'Dos bolas de helado, crema chantilly, salsa y topping', scoops: 2, choices: [crema, salsa, topping] }),
     p(desayunos.id, 'Energía dulce', 5890, { description: 'Té o café, pastel del día y jugo envasado', variants: desayunoBebida(5890) }),
     p(desayunos.id, 'Energía rosa', 6990, { description: 'Té o café, tostadas con palta y huevo y jugo envasado', variants: desayunoBebida(6990) }),
     p(desayunos.id, 'Energía encanto', 5290, { description: 'Té o café, aliado de jamón y queso y jugo envasado', variants: desayunoBebida(5290) }),
-    p(waffles.id, 'Tentación', 5490, { description: 'Base de manjar, fruta, crema, salsa y topping', extras: helado }),
-    p(waffles.id, 'Encanto', 5990, { description: 'Base de nutella, fruta, crema, salsa y topping', extras: helado }),
-    p(waffles.id, 'Amore', 6990, { description: 'Base de manjar, fruta, dos bolas de helado, crema, salsa y topping', extras: helado }),
-    p(waffles.id, 'Dolce', 7990, { description: 'Base de nutella, fruta, dos bolas de helado, crema, salsa y topping', extras: helado }),
-    p(celestinos.id, 'Celestino rosa', 5490, { description: 'Relleno de manjar, una bola de helado, fruta, salsa y crema' }),
-    p(celestinos.id, 'Celestino dolce', 5990, { description: 'Relleno de nutella, una bola de helado, fruta, salsa y crema' }),
+    p(waffles.id, 'Tentación', 5490, { description: 'Base de manjar, fruta, crema, salsa y topping', extras: helado, choices: waffle }),
+    p(waffles.id, 'Encanto', 5990, { description: 'Base de nutella, fruta, crema, salsa y topping', extras: helado, choices: waffle }),
+    p(waffles.id, 'Amore', 6990, { description: 'Base de manjar, fruta, dos bolas de helado, crema, salsa y topping', extras: helado, choices: waffle, scoops: 2 }),
+    p(waffles.id, 'Dolce', 7990, { description: 'Base de nutella, fruta, dos bolas de helado, crema, salsa y topping', extras: helado, choices: waffle, scoops: 2 }),
+    p(celestinos.id, 'Celestino rosa', 5490, { description: 'Relleno de manjar, una bola de helado, fruta, salsa y crema', choices: [fruta, crema, salsa], scoops: 1 }),
+    p(celestinos.id, 'Celestino dolce', 5990, { description: 'Relleno de nutella, una bola de helado, fruta, salsa y crema', choices: [fruta, crema, salsa], scoops: 1 }),
     p(fondue.id, 'Fondue', 15990, {
       description: 'Chocolate derretido, waffle, fruta y malvaviscos',
       extras: [
@@ -137,6 +142,8 @@ export function seedState(): AppState {
       paymentMethods: ['Efectivo', 'Débito', 'Crédito', 'Transferencia'],
       afternoonStartsAt: 15,
       adminPin: '1234',
+      printOnEmit: true,
+      iceCreamFlavors: ['Vainilla', 'Chocolate', 'Frutilla', 'Lúcuma', 'Manjar', 'Menta chip'],
     },
     audit: [],
     nextAccount: 1,

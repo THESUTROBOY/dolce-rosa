@@ -4,7 +4,7 @@ import { DomainError, localPersistence, Store } from './domain/store';
 import { dayKey, turnoOf } from './domain/calc';
 import type { AppState } from './domain/types';
 
-const store = new Store(localPersistence('dolce-rosa:v5'), () => demoState());
+const store = new Store(localPersistence('dolce-rosa:v6'), () => demoState());
 const StoreCtx = createContext(store);
 
 interface Ui {

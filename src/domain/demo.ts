@@ -1,4 +1,4 @@
-import { accountTotal, dayKey, suggestedTip, turnoOf } from './calc';
+import { accountTotal, dayKey, scoopsFor, suggestedTip, turnoOf } from './calc';
 import { seedState } from './seed';
 import type { Account, AppState, Comanda, Line, Option, Product, Station } from './types';
 
@@ -35,6 +35,16 @@ export function demoState(now = new Date()): AppState {
   });
   const tables = s.tables;
 
+  const flavors = s.settings.iceCreamFlavors ?? ['Vainilla'];
+  const demoChoices = (p: Product, extras: string[]) => {
+    const out = (p.choices ?? []).map((g) => {
+      const v = pick(g.options);
+      return /^(con|sin) /i.test(v) ? v : `${g.name} ${v.toLowerCase()}`;
+    });
+    const n = scoopsFor(p, extras);
+    if (n) out.push(`Helado ${Array.from({ length: n }, () => pick(flavors).toLowerCase()).join(' y ')}`);
+    return out.length ? out : undefined;
+  };
   const line = (at: Date, sent = true): Line => {
     const p = pick(weighted);
     const variant = p.variants.length ? pick(p.variants) : undefined;
@@ -45,6 +55,7 @@ export function demoState(now = new Date()): AppState {
       name: p.name,
       variant: variant?.name,
       extras: extras.map((e) => e.name),
+      choices: demoChoices(p, extras.map((e) => e.name)),
       unitPrice: (variant?.price ?? p.price) + extras.reduce((a, e) => a + e.price, 0),
       qty: r() < 0.2 ? 2 : 1,
       note: r() < 0.12 ? pick(NOTES) : '',
@@ -117,7 +128,7 @@ export function demoState(now = new Date()): AppState {
           accountId: a.id,
           tableName: a.tableName,
           station: st,
-          items: ls.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, qty: l.qty, note: l.note })),
+          items: ls.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, choices: l.choices, qty: l.qty, note: l.note })),
           createdAt: open.toISOString(),
           status: 'entregado',
           updatedAt: close.toISOString(),
@@ -148,7 +159,7 @@ export function demoState(now = new Date()): AppState {
       // Asegura que haya algo para cocina en las mesas con más pedidos.
       if (!ls.some((l) => l.station === 'cocina')) {
         const w = s.products.find((p) => p.name === 'Encanto')!;
-        ls.push({ ...line(when), productId: w.id, name: w.name, variant: undefined, extras: ['Bola de helado extra'], unitPrice: w.price + 990, station: 'cocina', note: '' });
+        ls.push({ ...line(when), productId: w.id, name: w.name, variant: undefined, extras: ['Bola de helado extra'], choices: demoChoices(w, ['Bola de helado extra']), unitPrice: w.price + 990, station: 'cocina', note: '' });
       }
       a.lines.push(...ls);
       for (const st of ['cocina', 'barra'] as Station[]) {
@@ -160,7 +171,7 @@ export function demoState(now = new Date()): AppState {
           accountId: a.id,
           tableName: a.tableName,
           station: st,
-          items: sl.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, qty: l.qty, note: l.note })),
+          items: sl.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, choices: l.choices, qty: l.qty, note: l.note })),
           createdAt: when.toISOString(),
           // La barra es más rápida que la cocina.
           status: st === 'barra' && step.status !== 'pendiente' ? 'entregado' : step.status,

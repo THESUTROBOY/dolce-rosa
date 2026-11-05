@@ -3,10 +3,11 @@ import { clp, dayKey, summarize } from '../domain/calc';
 import { demoState } from '../domain/demo';
 import { seedState } from '../domain/seed';
 import { uid } from '../domain/store';
-import type { AppState, Category, Option, Product, Settings, Station, TableDef } from '../domain/types';
+import type { AppState, Category, ChoiceGroup, Option, Product, Settings, Station, TableDef } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
 import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
-import { downloadFile, MoneyField, PinPad, Segmented, Sheet, toCsv } from './kit';
+import { downloadFile, MoneyField, PinPad, Segmented, Sheet, Stepper, toCsv } from './kit';
+import { FlavorsEditor } from './TableView';
 
 type Section = 'home' | 'reportes' | 'carta' | 'mesas' | 'ajustes' | 'datos';
 
@@ -325,6 +326,10 @@ function MenuAdmin() {
           Nuevo producto
         </button>
       </div>
+      <details className="flavors-admin">
+        <summary>Sabores de helado ({(state.settings.iceCreamFlavors ?? []).length})</summary>
+        <FlavorsEditor />
+      </details>
       <input className="search admin-search" type="search" placeholder="Buscar producto" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar producto" />
       <p className="hint">Toca un producto para cambiar su nombre, precio o extras, o para quitarlo. Toca el nombre de una categoría para editarla.</p>
       {cats.map((c) => (
@@ -523,6 +528,34 @@ function InlinePrice({ product }: { product: Product }) {
   );
 }
 
+/** Opciones sin costo que se eligen al pedir: un grupo por línea, opciones separadas por coma. */
+function ChoiceEditor({ groups, onChange }: { groups: ChoiceGroup[]; onChange(g: ChoiceGroup[]): void }) {
+  const set = (i: number, g: ChoiceGroup) => onChange(groups.map((x, j) => (j === i ? g : x)));
+  return (
+    <fieldset className="choice">
+      <legend>Opciones para elegir (sin costo)</legend>
+      <p className="hint">Ej: Salsa → chocolate, caramelo, frambuesa. Al pedir hay que elegir una de cada grupo.</p>
+      {groups.map((g, i) => (
+        <div key={i} className="choice-edit">
+          <input aria-label="Nombre del grupo" placeholder="Grupo (ej: Salsa)" value={g.name} onChange={(e) => set(i, { ...g, name: e.target.value })} />
+          <input
+            aria-label={`Opciones de ${g.name || 'este grupo'}`}
+            placeholder="Opciones separadas por coma"
+            defaultValue={g.options.join(', ')}
+            onChange={(e) => set(i, { ...g, options: e.target.value.split(',') })}
+          />
+          <button type="button" className="btn-plain danger" onClick={() => onChange(groups.filter((_, j) => j !== i))}>
+            Quitar
+          </button>
+        </div>
+      ))}
+      <button type="button" className="btn-plain" onClick={() => onChange([...groups, { name: '', options: [] }])}>
+        + Agregar grupo
+      </button>
+    </fieldset>
+  );
+}
+
 function ProductSheet({ product, categories, onClose, onSave, onRemove }: { product: Product; categories: Category[]; onClose(): void; onSave(p: Product): void; onRemove?(): void }) {
   const [p, setP] = useState(product);
   return (
@@ -535,8 +568,13 @@ function ProductSheet({ product, categories, onClose, onSave, onRemove }: { prod
           className="btn-primary wide"
           onClick={() => {
             const variants = p.variants.filter((v) => v.name.trim());
+            const choices = (p.choices ?? [])
+              .map((g) => ({ name: g.name.trim(), options: g.options.map((o) => o.trim()).filter(Boolean) }))
+              .filter((g) => g.name && g.options.length);
             onSave({
               ...p,
+              choices: choices.length ? choices : undefined,
+              scoops: p.scoops || undefined,
               name: p.name.trim(),
               variants,
               extras: p.extras.filter((v) => v.name.trim()),
@@ -569,6 +607,12 @@ function ProductSheet({ product, categories, onClose, onSave, onRemove }: { prod
       {p.variants.length === 0 && <MoneyField id="p-price" label="Precio con IVA" value={p.price} onChange={(price) => setP({ ...p, price })} />}
       <OptionEditor prefix="var" label="Tamaños o variantes" hint="Cada uno con su precio final. Si agregas tamaños, reemplazan al precio único." items={p.variants} onChange={(variants) => setP({ ...p, variants })} />
       <OptionEditor prefix="ext" label="Extras" hint="Se suman al precio. Ej: leche vegetal +$600." items={p.extras} onChange={(extras) => setP({ ...p, extras })} />
+      <ChoiceEditor groups={p.choices ?? []} onChange={(choices) => setP({ ...p, choices })} />
+      <fieldset className="choice">
+        <legend>Bolas de helado incluidas</legend>
+        <p className="hint">Al pedir se elige un sabor por bola. Si tiene el extra "Bola de helado extra", pide un sabor más.</p>
+        <Stepper value={p.scoops ?? 0} onChange={(scoops) => setP({ ...p, scoops })} label="Bolas de helado" />
+      </fieldset>
       {onRemove && (
         <button className="btn-plain danger" onClick={onRemove}>
           Quitar del menú

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, occupiesTable, suggestedTip } from '../domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, occupiesTable, scoopsFor, suggestedTip } from '../domain/calc';
 import type { Account, Comanda, Line, Product, Station } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
@@ -168,7 +168,7 @@ function priceLabel(p: Product) {
   return min === Math.max(...prices) ? clp(min) : `desde ${clp(min)}`;
 }
 
-const QUICK_NOTES = ['Sin azúcar', 'Con endulzante', 'Bien caliente', 'Tibio', 'Con hielo aparte', 'Sin crema', 'Para llevar', 'Separar salsa'];
+const QUICK_NOTES = ['Sin azúcar', 'Con endulzante', 'Bien caliente', 'Tibio', 'Con hielo aparte', 'Para llevar', 'Separar salsa'];
 
 function AddSheet({ tableId, product, onClose }: { tableId: string; product: Product; onClose(): void }) {
   const run = useAction();
@@ -177,6 +177,12 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
   const [extras, setExtras] = useState<string[]>([]);
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState('');
+  const [choices, setChoices] = useState<Record<string, string>>({});
+  const [flavors, setFlavors] = useState<string[]>([]);
+  const scoops = scoopsFor(product, extras);
+  const missing =
+    (product.choices ?? []).find((g) => !choices[g.name])?.name.toLowerCase() ??
+    (Array.from({ length: scoops }, (_, i) => flavors[i]?.trim()).some((f) => !f) ? (scoops === 1 ? 'sabor del helado' : 'sabores del helado') : null);
   const unit = (variant ? product.variants.find((v) => v.name === variant)!.price : product.price) + extras.reduce((s, e) => s + (product.extras.find((x) => x.name === e)?.price ?? 0), 0);
   const station: Station = store.stationOf(product.id);
   const samePrice = product.variants.every((v) => v.price === product.variants[0].price);
@@ -192,11 +198,12 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
           <button
             className="btn-primary grow"
             onClick={() => {
-              const ok = run(() => (store.addLine(tableId, { productId: product.id, variant, extras, qty, note }), true));
+              const ok = run(() => (store.addLine(tableId, { productId: product.id, variant, extras, choices, flavors: flavors.slice(0, scoops), qty, note }), true));
               if (ok) onClose();
             }}
+            disabled={!!missing}
           >
-            Agregar {clp(unit * qty)}
+            {missing ? `Elige ${missing}` : `Agregar ${clp(unit * qty)}`}
           </button>
         </div>
       }
@@ -236,6 +243,32 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
           })}
         </fieldset>
       )}
+      {(product.choices ?? []).map((g) => (
+        <fieldset key={g.name} className="choice">
+          <legend>{g.name}</legend>
+          <div className="chips-wrap pick" role="radiogroup" aria-label={g.name}>
+            {g.options.map((o) => (
+              <button
+                key={o}
+                type="button"
+                role="radio"
+                aria-checked={choices[g.name] === o}
+                className={`chip ${choices[g.name] === o ? 'on' : ''}`}
+                onClick={() => setChoices({ ...choices, [g.name]: o })}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+      {scoops > 0 && (
+        <FlavorPicker
+          scoops={scoops}
+          value={flavors}
+          onChange={setFlavors}
+        />
+      )}
       <label className="field" htmlFor="line-note">
         <span>Nota para preparación</span>
         <textarea id="line-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ej: sin azúcar, tibio" />
@@ -248,6 +281,82 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
         ))}
       </div>
     </Sheet>
+  );
+}
+
+/** Lista de sabores de helado: se quitan los que se acaban y se agregan los nuevos, sin PIN. */
+export function FlavorsEditor() {
+  const state = useAppState();
+  const store = useStore();
+  const run = useAction();
+  const list = state.settings.iceCreamFlavors ?? [];
+  const [newFlavor, setNewFlavor] = useState('');
+  const add = () => {
+    if (!newFlavor.trim()) return;
+    run(() => store.setFlavors([...list, newFlavor]), `Sabor agregado: ${newFlavor.trim()}`);
+    setNewFlavor('');
+  };
+  return (
+    <div className="flavor-edit">
+      <p className="hint">Quita los que se acabaron y agrega los nuevos. Se actualiza para todos.</p>
+      <div className="chips-wrap">
+        {list.map((f) => (
+          <button key={f} type="button" className="chip chip-x" onClick={() => run(() => store.setFlavors(list.filter((x) => x !== f)), `${f} quitado`)} aria-label={`Quitar ${f}`}>
+            {f} <span aria-hidden>×</span>
+          </button>
+        ))}
+        {list.length === 0 && <span className="hint">No hay sabores cargados.</span>}
+      </div>
+      <div className="field-row">
+        <input aria-label="Nuevo sabor" placeholder="Nuevo sabor" value={newFlavor} onChange={(e) => setNewFlavor(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <button type="button" className="btn-secondary" onClick={add}>
+          Agregar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Sabor por bola de helado. La lista de sabores se edita aquí mismo cuando uno se acaba o llega otro. */
+function FlavorPicker({ scoops, value, onChange }: { scoops: number; value: string[]; onChange(v: string[]): void }) {
+  const state = useAppState();
+  const list = state.settings.iceCreamFlavors ?? [];
+  const [editing, setEditing] = useState(false);
+  const [other, setOther] = useState<number | null>(null);
+  const set = (i: number, f: string) => {
+    const next = [...value];
+    next[i] = f;
+    onChange(next);
+  };
+  return (
+    <fieldset className="choice">
+      <legend className="legend-row">
+        <span>{scoops === 1 ? 'Sabor del helado' : `Sabores del helado (${scoops} bolas)`}</span>
+        <button type="button" className="btn-plain small" onClick={() => setEditing(!editing)}>
+          {editing ? 'Listo' : 'Editar sabores'}
+        </button>
+      </legend>
+      {editing ? (
+        <FlavorsEditor />
+      ) : (
+        Array.from({ length: scoops }, (_, i) => (
+          <div key={i} className="scoop">
+            {scoops > 1 && <span className="scoop-n">Bola {i + 1}</span>}
+            <div className="chips-wrap pick">
+              {list.map((f) => (
+                <button key={f} type="button" className={`chip ${value[i] === f && other !== i ? 'on' : ''}`} onClick={() => (setOther(null), set(i, f))}>
+                  {f}
+                </button>
+              ))}
+              <button type="button" className={`chip ${other === i ? 'on' : ''}`} onClick={() => (setOther(i), set(i, ''))}>
+                Otro…
+              </button>
+            </div>
+            {other === i && <input className="scoop-other" aria-label={`Sabor de la bola ${i + 1}`} placeholder="Escribe el sabor" value={value[i] ?? ''} onChange={(e) => set(i, e.target.value)} autoFocus />}
+          </div>
+        ))
+      )}
+    </fieldset>
   );
 }
 
@@ -300,6 +409,7 @@ function SendSheet({ account, onClose }: { account: Account; onClose(): void }) 
                     {l.variant && <span className="muted"> · {l.variant}</span>}
                   </span>
                   {l.extras.length > 0 && <span className="row-sub">+ {l.extras.join(', ')}</span>}
+                  {l.choices && <span className="row-sub">{l.choices.join(' · ')}</span>}
                   {l.note ? (
                     <button className="note-link" onClick={() => setEditing(l)}>
                       “{l.note}”
@@ -420,6 +530,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
                   <span>{clp(lineTotal(l))}</span>
                 </div>
                 {l.extras.length > 0 && <div className="rc-sub">+ {l.extras.join(', ')}</div>}
+                {l.choices && <div className="rc-sub">{l.choices.join(' · ')}</div>}
                 {l.note && <div className="rc-sub rc-note">“{l.note}”</div>}
                 <div className="rc-meta">
                   <span className={`pill ${LINE_STATE[st].cls}`}>{LINE_STATE[st].label}</span>

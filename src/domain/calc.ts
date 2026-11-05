@@ -1,4 +1,4 @@
-import type { Account, AppState, Line, Turno } from './types';
+import type { Account, AppState, Line, Product, Turno } from './types';
 
 export const IVA = 0.19;
 
@@ -15,6 +15,11 @@ export function netAndTax(total: number) {
 }
 
 export const suggestedTip = (total: number, percent: number) => Math.round((total * percent) / 100 / 10) * 10;
+
+/** Bolas de helado que lleva un producto con los extras elegidos. */
+export function scoopsFor(p: Product, extras: string[]): number {
+  return (p.scoops ?? 0) + extras.filter((e) => /bola de helado/i.test(e)).length;
+}
 
 /** La cuenta ocupa la mesa mientras está abierta o emitida sin cobrar. */
 export function occupiesTable(a: Account): boolean {

@@ -76,6 +76,11 @@ export function Kitchen() {
                     {i.variant ? ` · ${i.variant}` : ''}
                   </strong>
                   {i.extras.length > 0 && <span className="tk-extra">+ {i.extras.join(', ')}</span>}
+                {i.choices?.map((c) => (
+                  <span key={c} className="tk-choice">
+                    {c}
+                  </span>
+                ))}
                   {i.note && <span className="tk-note">{i.note}</span>}
                 </div>
               </li>

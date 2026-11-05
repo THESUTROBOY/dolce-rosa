@@ -16,7 +16,8 @@ export function accountHtml(a: Account, s: Settings) {
     .map(
       (l) =>
         `<div class="r"><span>${l.qty} x ${esc([l.name, l.variant].filter(Boolean).join(' '))}</span><span>${clp(lineTotal(l))}</span></div>` +
-        (l.extras.length ? `<div class="n">+ ${l.extras.map(esc).join(', ')}</div>` : ''),
+        (l.extras.length ? `<div class="n">+ ${l.extras.map(esc).join(', ')}</div>` : '') +
+        (l.choices?.length ? `<div class="n">${l.choices.map(esc).join(' · ')}</div>` : ''),
     )
     .join('');
   return `<style>${PAGE}</style><h1>${esc(s.businessName)}</h1>
@@ -40,7 +41,7 @@ export function accountHtml(a: Account, s: Settings) {
 export function comandaHtml(c: Comanda) {
   return `<style>${PAGE} body{font-size:14px}</style><div class="c b">${esc(STATION_LABEL[c.station]).toUpperCase()}</div>
   <div class="c b">${esc(c.tableName)} · #${c.number}</div><div class="c s">${when(c.createdAt)}</div><hr>
-  ${c.items.map((i) => `<div><b>${i.qty} x ${esc([i.name, i.variant].filter(Boolean).join(' '))}</b></div>${i.extras.length ? `<div class="n">+ ${i.extras.map(esc).join(', ')}</div>` : ''}${i.note ? `<div class="n">» ${esc(i.note)}</div>` : ''}`).join('')}<hr>`;
+  ${c.items.map((i) => `<div><b>${i.qty} x ${esc([i.name, i.variant].filter(Boolean).join(' '))}</b></div>${i.extras.length ? `<div class="n">+ ${i.extras.map(esc).join(', ')}</div>` : ''}${(i.choices ?? []).map((c) => `<div class="n">- ${esc(c)}</div>`).join('')}${i.note ? `<div class="n">» ${esc(i.note)}</div>` : ''}`).join('')}<hr>`;
 }
 
 export function printHtml(html: string) {
