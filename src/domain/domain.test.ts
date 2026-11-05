@@ -34,6 +34,10 @@ describe('mesa: pedido, comandas y detalle', () => {
     expect(coms.map((c) => c.station).sort()).toEqual(['barra', 'cocina']);
     expect(coms.find((c) => c.station === 'barra')!.items[0].note).toBe('sin azúcar');
     expect(() => s.send(acc.id)).toThrow(/No hay productos nuevos/);
+    // El mesero puede entregar todo aunque siga en preparación.
+    expect(s.markServed(acc.id)).toBe(2);
+    expect(s.get().comandas.every((c) => c.status === 'entregado')).toBe(true);
+    expect(() => s.markServed(acc.id)).toThrow(/nada pendiente/);
   });
 
   it('solo se editan productos sin enviar y la cuenta vacía desaparece', () => {

@@ -388,6 +388,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
   const { neto, iva } = netAndTax(total);
   const hasUnsent = account.lines.some((l) => !l.sentAt);
   const pending = account.status === 'emitida';
+  const toServe = state.comandas.filter((c) => c.accountId === account.id && c.status !== 'entregado').length;
   const suggested = suggestedTip(total, state.settings.tipPercent);
   const emitNow = () => {
     const ok = run(() => (store.emit(account.id), true));
@@ -483,6 +484,13 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
           </>
         ) : (
           <>
+            {toServe > 0 ? (
+              <button className="btn-ok wide" onClick={() => run(() => store.markServed(account.id), 'Todo entregado en la mesa')}>
+                Marcar todo entregado
+              </button>
+            ) : (
+              account.lines.length > 0 && !hasUnsent && <p className="served-note">✓ Todo lo pedido ya está entregado en la mesa.</p>
+            )}
             {hasUnsent && <p className="hint">Hay productos sin enviar. Envíalos antes de emitir el detalle.</p>}
             <button className="btn-primary wide" disabled={hasUnsent} onClick={emitNow}>
               {canPrint && state.settings.printOnEmit !== false ? 'Emitir e imprimir detalle' : 'Emitir detalle de cuenta'}

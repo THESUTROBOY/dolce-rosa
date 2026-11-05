@@ -251,6 +251,21 @@ export class Store {
     });
   }
 
+  /** El mesero entrega en la mesa todo lo enviado (esté en preparación o listo). Devuelve cuántas comandas cerró. */
+  markServed(accountId: string): number {
+    const pending = this.state.comandas.filter((c) => c.accountId === accountId && c.status !== 'entregado');
+    if (!pending.length) throw new DomainError('No hay nada pendiente de entregar');
+    this.commit((d) => {
+      d.comandas
+        .filter((c) => c.accountId === accountId && c.status !== 'entregado')
+        .forEach((c) => {
+          c.status = 'entregado';
+          c.updatedAt = this.iso();
+        });
+    });
+    return pending.length;
+  }
+
   moveTable(accountId: string, tableId: string) {
     const table = this.state.tables.find((t) => t.id === tableId);
     if (!table) throw new DomainError('Mesa no encontrada');

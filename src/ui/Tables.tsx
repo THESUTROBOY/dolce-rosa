@@ -1,6 +1,6 @@
 import { accountTotal, clp, occupiesTable } from '../domain/calc';
 import type { TableDef } from '../domain/types';
-import { ago, useAppState, useNow, useUi } from '../state';
+import { ago, useAction, useAppState, useNow, useStore, useUi } from '../state';
 
 type Shape = 'cuadrada' | 'redonda' | 'barra';
 
@@ -28,6 +28,8 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
   const state = useAppState();
   const now = useNow();
   const { theme, themeIsAuto, toggleTheme } = useUi();
+  const store = useStore();
+  const run = useAction();
   const open = state.accounts.filter(occupiesTable);
   const busy = open.length;
 
@@ -58,33 +60,41 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
           const unsent = a ? a.lines.filter((l) => !l.sentAt).length : 0;
           const shape = shapeOf(t);
           const items = a ? a.lines.reduce((s, l) => s + l.qty, 0) : 0;
+          const allServed = !!a && a.status === 'abierta' && unsent === 0 && coms.length > 0 && ready === 0 && cooking === 0;
           return (
-            <button
-              key={t.id}
-              className={`table table-${shape} ${a ? 'busy' : ''} ${ready ? 'ready' : ''} ${a?.status === 'emitida' ? 'pending' : ''}`}
-              onClick={() => onOpen(t.id)}
-              aria-label={`${t.name}, ${a ? `ocupada, ${clp(accountTotal(a))}` : 'libre'}`}
-            >
-              <span className="table-top">
-                <span className="tt-name">{t.name}</span>
-                {a ? (
-                  <>
-                    <span className="tt-total">{clp(accountTotal(a))}</span>
-                    <span className="tt-meta">
-                      {items} {items === 1 ? 'producto' : 'productos'} · {ago(a.openedAt, now)}
-                    </span>
-                  </>
-                ) : (
-                  <span className="tt-free">Libre</span>
-                )}
-              </span>
-              <span className="tt-badges">
-                {ready > 0 && <span className="pill pill-ok">Listo para servir</span>}
-                {cooking > 0 && <span className="pill pill-warn">En preparación</span>}
-                {unsent > 0 && <span className="pill pill-brand">Sin enviar</span>}
-                {a?.status === 'emitida' && <span className="pill pill-warn">Por cobrar</span>}
-              </span>
-            </button>
+            <div key={t.id} className="table-slot">
+              <button
+                className={`table table-${shape} ${a ? 'busy' : ''} ${ready ? 'ready' : ''} ${a?.status === 'emitida' ? 'pending' : ''}`}
+                onClick={() => onOpen(t.id)}
+                aria-label={`${t.name}, ${a ? `ocupada, ${clp(accountTotal(a))}` : 'libre'}`}
+              >
+                <span className="table-top">
+                  <span className="tt-name">{t.name}</span>
+                  {a ? (
+                    <>
+                      <span className="tt-total">{clp(accountTotal(a))}</span>
+                      <span className="tt-meta">
+                        {items} {items === 1 ? 'producto' : 'productos'} · {ago(a.openedAt, now)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="tt-free">Libre</span>
+                  )}
+                </span>
+                <span className="tt-badges">
+                  {ready > 0 && <span className="pill pill-ok">Listo para servir</span>}
+                  {cooking > 0 && <span className="pill pill-warn">En preparación</span>}
+                  {unsent > 0 && <span className="pill pill-brand">Sin enviar</span>}
+                  {allServed && <span className="pill pill-done">✓ Todo entregado</span>}
+                  {a?.status === 'emitida' && <span className="pill pill-warn">Por cobrar</span>}
+                </span>
+              </button>
+              {a && (ready > 0 || cooking > 0) && (
+                <button className="tt-deliver" onClick={() => run(() => store.markServed(a.id), `${t.name}: todo entregado`)}>
+                  Marcar entregado
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
