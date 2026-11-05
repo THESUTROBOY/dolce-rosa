@@ -12,6 +12,8 @@ export interface Persistence {
 /** Respaldos anteriores al ID de detalle: continúa la numeración desde el mayor existente. */
 function withFolio(s: AppState): AppState {
   if (!s.nextFolio) s.nextFolio = Math.max(0, ...s.accounts.map((a) => a.folio ?? 0)) + 1;
+  // Antes el pago se registraba al emitir: esas cuentas ya están pagadas y no deben ocupar la mesa.
+  for (const a of s.accounts) if (a.status === 'emitida' && !a.paidAt && a.paymentMethod) a.paidAt = a.emittedAt;
   return s;
 }
 
@@ -44,9 +46,9 @@ export const localPersistence = (key: string): Persistence => ({
   },
 });
 
-export const memoryPersistence = (): Persistence => {
-  let s: AppState | null = null;
-  return { load: () => s, save: (x) => (s = structuredClone(x)) };
+export const memoryPersistence = (initial?: AppState): Persistence => {
+  let s: AppState | null = initial ? structuredClone(initial) : null;
+  return { load: () => (s ? withFolio(s) : null), save: (x) => (s = structuredClone(x)) };
 };
 
 export class DomainError extends Error {}

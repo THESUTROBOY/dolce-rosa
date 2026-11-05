@@ -108,6 +108,17 @@ describe('mesa: pedido, comandas y detalle', () => {
   });
 });
 
+describe('datos guardados antes del cambio de flujo', () => {
+  it('las cuentas cobradas al emitir quedan pagadas y no ocupan la mesa', () => {
+    const base = new Store(memoryPersistence()).get();
+    const old = structuredClone(base);
+    old.accounts.push({ id: 'x', number: 1, tableId: old.tables[0].id, tableName: 'Mesa 1', status: 'emitida', lines: [], openedAt: '2026-11-05T10:00:00', emittedAt: '2026-11-05T10:30:00', tip: 0, paymentMethod: 'Débito', folio: 1 });
+    const s = new Store(memoryPersistence(old));
+    expect(s.get().accounts[0].paidAt).toBe('2026-11-05T10:30:00');
+    expect(s.openAccountFor(old.tables[0].id)).toBeUndefined();
+  });
+});
+
 describe('datos de prueba', () => {
   it('son consistentes y tienen trabajo para cocina', () => {
     const now = new Date('2026-11-05T16:30:00');

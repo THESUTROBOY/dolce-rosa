@@ -755,7 +755,8 @@ button:disabled {
   letter-spacing: -0.01em;
 }
 .tt-free {
-  color: var(--muted);
+  color: var(--ok);
+  font-weight: 600;
   font-size: 14px;
 }
 .tt-total {
