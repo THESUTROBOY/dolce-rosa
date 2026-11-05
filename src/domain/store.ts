@@ -60,7 +60,7 @@ export interface NewLine {
   variant?: string;
   extras: string[];
   /** Grupo → opción elegida. */
-  choices?: Record<string, string>;
+  choices?: Record<string, string | string[]>;
   /** Un sabor por bola de helado (incluidas + extras). */
   flavors?: string[];
   qty: number;
@@ -143,9 +143,12 @@ export class Store {
     }, 0);
     const choices: string[] = [];
     for (const g of p.choices ?? []) {
-      const v = l.choices?.[g.name];
-      if (!v || !g.options.includes(v)) throw new DomainError(`Elige ${g.name.toLowerCase()}`);
-      choices.push(/^(con|sin) /i.test(v) ? v : `${g.name} ${v.toLowerCase()}`);
+      const raw = l.choices?.[g.name];
+      const picked = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter((v) => g.options.includes(v));
+      if (!picked.length || (!g.multi && picked.length > 1)) throw new DomainError(`Elige ${g.name.toLowerCase()}`);
+      // Mantiene el orden de la carta: "Fruta frutilla y plátano".
+      const v = g.options.filter((o) => picked.includes(o)).map((o) => o.toLowerCase()).join(' y ');
+      choices.push(/^(con|sin) /i.test(v) ? v.charAt(0).toUpperCase() + v.slice(1) : `${g.name} ${v}`);
     }
     const scoops = scoopsFor(p, l.extras);
     const flavors = (l.flavors ?? []).map((f) => f.trim()).filter(Boolean);

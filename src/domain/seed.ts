@@ -30,7 +30,7 @@ export function seedState(): AppState {
   const salsa: ChoiceGroup = { name: 'Salsa', options: ['Chocolate', 'Caramelo', 'Frambuesa', 'Manjar'] };
   const topping: ChoiceGroup = { name: 'Topping', options: ['Chubi', 'Oreo', 'Malvas', 'Chips de colores'] };
   const crema: ChoiceGroup = { name: 'Crema', options: ['Con crema', 'Sin crema'] };
-  const fruta: ChoiceGroup = { name: 'Fruta', options: ['Frutilla', 'Plátano'] };
+  const fruta: ChoiceGroup = { name: 'Fruta', options: ['Frutilla', 'Plátano'], multi: true };
   const waffle = [fruta, crema, salsa, topping];
   const desayunoBebida = (base: number): Option[] => ['Té negro', 'Cappuccino', 'Latte', 'Americano'].map((name) => ({ name, price: base }));
   const desmechado = (base: number): Option[] => [

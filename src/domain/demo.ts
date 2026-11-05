@@ -38,7 +38,7 @@ export function demoState(now = new Date()): AppState {
   const flavors = s.settings.iceCreamFlavors ?? ['Vainilla'];
   const demoChoices = (p: Product, extras: string[]) => {
     const out = (p.choices ?? []).map((g) => {
-      const v = pick(g.options);
+      const v = g.multi && r() < 0.4 ? g.options.map((o) => o.toLowerCase()).join(' y ') : pick(g.options);
       return /^(con|sin) /i.test(v) ? v : `${g.name} ${v.toLowerCase()}`;
     });
     const n = scoopsFor(p, extras);

@@ -25,6 +25,8 @@ export interface Option {
 export interface ChoiceGroup {
   name: string;
   options: string[];
+  /** Se puede elegir más de una (ej. fruta: frutilla y plátano). */
+  multi?: boolean;
 }
 
 export interface Product {

@@ -547,6 +547,10 @@ function ChoiceEditor({ groups, onChange }: { groups: ChoiceGroup[]; onChange(g:
           <button type="button" className="btn-plain danger" onClick={() => onChange(groups.filter((_, j) => j !== i))}>
             Quitar
           </button>
+          <label className="toggle choice-multi">
+            <input type="checkbox" checked={!!g.multi} onChange={(e) => set(i, { ...g, multi: e.target.checked || undefined })} />
+            <span>Se puede elegir más de una</span>
+          </label>
         </div>
       ))}
       <button type="button" className="btn-plain" onClick={() => onChange([...groups, { name: '', options: [] }])}>
@@ -569,7 +573,7 @@ function ProductSheet({ product, categories, onClose, onSave, onRemove }: { prod
           onClick={() => {
             const variants = p.variants.filter((v) => v.name.trim());
             const choices = (p.choices ?? [])
-              .map((g) => ({ name: g.name.trim(), options: g.options.map((o) => o.trim()).filter(Boolean) }))
+              .map((g) => ({ name: g.name.trim(), options: g.options.map((o) => o.trim()).filter(Boolean), multi: g.multi }))
               .filter((g) => g.name && g.options.length);
             onSave({
               ...p,

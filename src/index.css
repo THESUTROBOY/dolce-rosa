@@ -2128,3 +2128,13 @@ button:disabled {
   cursor: pointer;
   min-height: 28px;
 }
+
+.legend-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.choice-multi {
+  grid-column: 1 / -1;
+  font-size: 14px;
+}

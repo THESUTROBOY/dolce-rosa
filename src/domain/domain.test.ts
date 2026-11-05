@@ -29,10 +29,11 @@ describe('mesa: pedido, comandas y detalle', () => {
     // Tentación pide fruta, crema, salsa y topping; con la bola extra también el sabor.
     const pedido = { productId: prod('Tentación').id, extras: ['Bola de helado extra'], qty: 1, note: '' };
     expect(() => s.addLine(table.id, pedido)).toThrow(/Elige fruta/);
-    const choices = { Fruta: 'Plátano', Crema: 'Sin crema', Salsa: 'Manjar', Topping: 'Oreo' };
+    expect(() => s.addLine(table.id, { ...pedido, choices: { Fruta: 'Plátano', Crema: ['Con crema', 'Sin crema'], Salsa: 'Manjar', Topping: 'Oreo' } })).toThrow(/Elige crema/);
+    const choices = { Fruta: ['Plátano', 'Frutilla'], Crema: 'Sin crema', Salsa: 'Manjar', Topping: 'Oreo' };
     expect(() => s.addLine(table.id, { ...pedido, choices })).toThrow(/sabor/);
     const acc = s.addLine(table.id, { ...pedido, choices, flavors: ['Lúcuma'] });
-    expect(acc.lines.at(-1)!.choices).toEqual(['Fruta plátano', 'Sin crema', 'Salsa manjar', 'Topping oreo', 'Helado lúcuma']);
+    expect(acc.lines.at(-1)!.choices).toEqual(['Fruta frutilla y plátano', 'Sin crema', 'Salsa manjar', 'Topping oreo', 'Helado lúcuma']);
     expect(accountTotal(acc)).toBe((3290 + 700) * 2 + 5490 + 990);
     const counts = s.send(acc.id);
     expect(counts).toEqual({ barra: 2, cocina: 1 });

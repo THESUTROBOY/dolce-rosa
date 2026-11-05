@@ -177,11 +177,11 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
   const [extras, setExtras] = useState<string[]>([]);
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState('');
-  const [choices, setChoices] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<Record<string, string[]>>({});
   const [flavors, setFlavors] = useState<string[]>([]);
   const scoops = scoopsFor(product, extras);
   const missing =
-    (product.choices ?? []).find((g) => !choices[g.name])?.name.toLowerCase() ??
+    (product.choices ?? []).find((g) => !choices[g.name]?.length)?.name.toLowerCase() ??
     (Array.from({ length: scoops }, (_, i) => flavors[i]?.trim()).some((f) => !f) ? (scoops === 1 ? 'sabor del helado' : 'sabores del helado') : null);
   const unit = (variant ? product.variants.find((v) => v.name === variant)!.price : product.price) + extras.reduce((s, e) => s + (product.extras.find((x) => x.name === e)?.price ?? 0), 0);
   const station: Station = store.stationOf(product.id);
@@ -245,20 +245,27 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
       )}
       {(product.choices ?? []).map((g) => (
         <fieldset key={g.name} className="choice">
-          <legend>{g.name}</legend>
-          <div className="chips-wrap pick" role="radiogroup" aria-label={g.name}>
-            {g.options.map((o) => (
-              <button
-                key={o}
-                type="button"
-                role="radio"
-                aria-checked={choices[g.name] === o}
-                className={`chip ${choices[g.name] === o ? 'on' : ''}`}
-                onClick={() => setChoices({ ...choices, [g.name]: o })}
-              >
-                {o}
-              </button>
-            ))}
+          <legend>
+            {g.name}
+            {g.multi && <span className="legend-hint"> · puedes elegir más de una</span>}
+          </legend>
+          <div className="chips-wrap pick" role={g.multi ? 'group' : 'radiogroup'} aria-label={g.name}>
+            {g.options.map((o) => {
+              const on = !!choices[g.name]?.includes(o);
+              const cur = choices[g.name] ?? [];
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  role={g.multi ? 'checkbox' : 'radio'}
+                  aria-checked={on}
+                  className={`chip ${on ? 'on' : ''}`}
+                  onClick={() => setChoices({ ...choices, [g.name]: g.multi ? (on ? cur.filter((x) => x !== o) : [...cur, o]) : [o] })}
+                >
+                  {o}
+                </button>
+              );
+            })}
           </div>
         </fieldset>
       ))}
