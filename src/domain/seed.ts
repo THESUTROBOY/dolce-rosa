@@ -124,9 +124,6 @@ export function seedState(): AppState {
     products,
     tables: [
       ...Array.from({ length: 8 }, (_, i) => ({ id: id('mesa'), name: `Mesa ${i + 1}` })),
-      { id: id('mesa'), name: 'Terraza 1' },
-      { id: id('mesa'), name: 'Terraza 2' },
-      { id: id('mesa'), name: 'Barra' },
       { id: id('mesa'), name: 'Para llevar' },
     ],
     accounts: [],

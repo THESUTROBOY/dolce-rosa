@@ -33,7 +33,7 @@ export function demoState(now = new Date()): AppState {
     const w: Record<string, number> = { 'Cafetería caliente': 5, 'Cafetería fría': 3, Pastelería: 2, Tortas: 3, Fondue: 1, Desayunos: 2 };
     return Array(w[c] ?? 2).fill(p);
   });
-  const tables = s.tables.filter((t) => t.name !== 'Barra');
+  const tables = s.tables;
 
   const line = (at: Date, sent = true): Line => {
     const p = pick(weighted);
@@ -175,7 +175,7 @@ export function demoState(now = new Date()): AppState {
   openTable('Mesa 2', [{ ago: 42, status: 'entregado' }]);
   openTable('Mesa 3', [{ ago: 18, status: 'listo' }]);
   openTable('Mesa 5', [{ ago: 9, status: 'preparando' }]);
-  openTable('Terraza 1', [{ ago: 4, status: 'pendiente' }]);
+  openTable('Mesa 8', [{ ago: 4, status: 'pendiente' }]);
   openTable('Mesa 7', [], 2);
 
   accounts.sort((a, b) => a.openedAt.localeCompare(b.openedAt));
