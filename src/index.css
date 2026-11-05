@@ -1,27 +1,30 @@
 /*
   Dolce Rosa · interfaz de servicio para iPhone.
+  Dos temas: Día (claro, rosado) para el turno mañana y Tarde (ciruela de atardecer) para el turno tarde.
   Layout: pantalla única con barra de pestañas translúcida abajo (estilo iOS), títulos grandes,
   listas agrupadas y hojas que suben desde abajo. Rosa de la marca solo para acciones y estado.
 */
 :root {
-  --bg: #f7f1f2;
-  --surface: #ffffff;
-  --surface-2: #f1e7ea;
-  --text: #2a1d22;
-  --muted: #86727a;
-  --line: #ead9de;
-  --brand: #c2577a;
+  /* Día: rosado pastel de la carta (#ffd6d6 de fondo, #f9b1d2 de las hojas). */
+  --bg: #ffe2e2;
+  --surface: #fff7f7;
+  --surface-2: #ffd6d6;
+  --text: #2b1a20;
+  --muted: #86646d;
+  --line: #f6c4cb;
+  --brand: #c9447f;
   --brand-ink: #ffffff;
-  --brand-soft: #fbe4ec;
-  --ok: #2f8a5b;
-  --ok-soft: #e1f3e9;
-  --warn: #b26b12;
-  --warn-soft: #fdf0dc;
-  --danger: #c43d32;
-  --danger-soft: #fce6e3;
-  --chrome: rgb(250 245 246 / 78%);
-  --scrim: rgb(40 18 26 / 38%);
-  --shadow: 0 1px 2px rgb(80 30 50 / 6%), 0 6px 20px rgb(80 30 50 / 7%);
+  --brand-soft: #fbd0e3;
+  --leaf: #f9b1d2;
+  --ok: #2c7f57;
+  --ok-soft: #d9f1e3;
+  --warn: #a35f0d;
+  --warn-soft: #fdebd2;
+  --danger: #c0392f;
+  --danger-soft: #fde0dd;
+  --chrome: rgb(255 234 234 / 80%);
+  --scrim: rgb(60 20 36 / 36%);
+  --shadow: 0 1px 2px rgb(150 50 80 / 8%), 0 6px 18px rgb(150 50 80 / 10%);
   --radius: 14px;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
@@ -36,44 +39,48 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #140e10;
-    --surface: #211a1d;
-    --surface-2: #2d2428;
-    --text: #f5ecee;
-    --muted: #ae979f;
-    --line: #3a2e33;
-    --brand: #e87ea3;
-    --brand-ink: #1a0f13;
-    --brand-soft: #46222f;
-    --ok: #5fcb92;
-    --ok-soft: #1c3a2a;
-    --warn: #f0b45e;
-    --warn-soft: #3d2f18;
-    --danger: #f27b70;
-    --danger-soft: #45201c;
-    --chrome: rgb(26 19 22 / 78%);
-    --scrim: rgb(0 0 0 / 55%);
+    --bg: #2a1a22;
+    --surface: #36232d;
+    --surface-2: #442d39;
+    --text: #fbefea;
+    --muted: #c4a7ae;
+    --line: #4b3640;
+    --brand: #f9b1d2;
+    --brand-ink: #2a1320;
+    --brand-soft: #55283c;
+    --leaf: #f9b1d2;
+    --ok: #6fd3a0;
+    --ok-soft: #1f3d2e;
+    --warn: #f5bb6a;
+    --warn-soft: #45331b;
+    --danger: #f5857a;
+    --danger-soft: #4d231f;
+    --chrome: rgb(38 25 31 / 80%);
+    --scrim: rgb(10 4 7 / 58%);
+    --shadow: 0 1px 2px rgb(0 0 0 / 25%), 0 8px 22px rgb(0 0 0 / 28%);
     color-scheme: dark;
   }
 }
 :root[data-theme='dark'] {
-  --bg: #140e10;
-  --surface: #211a1d;
-  --surface-2: #2d2428;
-  --text: #f5ecee;
-  --muted: #ae979f;
-  --line: #3a2e33;
-  --brand: #e87ea3;
-  --brand-ink: #1a0f13;
-  --brand-soft: #46222f;
-  --ok: #5fcb92;
-  --ok-soft: #1c3a2a;
-  --warn: #f0b45e;
-  --warn-soft: #3d2f18;
-  --danger: #f27b70;
-  --danger-soft: #45201c;
-  --chrome: rgb(26 19 22 / 78%);
-  --scrim: rgb(0 0 0 / 55%);
+  --bg: #2a1a22;
+  --surface: #36232d;
+  --surface-2: #442d39;
+  --text: #fbefea;
+  --muted: #c4a7ae;
+  --line: #4b3640;
+  --brand: #f9b1d2;
+  --brand-ink: #2a1320;
+  --brand-soft: #55283c;
+  --leaf: #f9b1d2;
+  --ok: #6fd3a0;
+  --ok-soft: #1f3d2e;
+  --warn: #f5bb6a;
+  --warn-soft: #45331b;
+  --danger: #f5857a;
+  --danger-soft: #4d231f;
+  --chrome: rgb(38 25 31 / 80%);
+  --scrim: rgb(10 4 7 / 58%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 25%), 0 8px 22px rgb(0 0 0 / 28%);
   color-scheme: dark;
 }
 
@@ -197,7 +204,6 @@ button:disabled {
 .btn-danger:active:not(:disabled),
 .btn-ok:active:not(:disabled),
 .row-btn:active:not(:disabled),
-.table-tile:active,
 .chip:active,
 .method:active {
   transform: scale(0.97);
@@ -601,6 +607,10 @@ button:disabled {
 .row-sub {
   font-size: 14px;
   color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .row-price {
   font-variant-numeric: tabular-nums;
@@ -654,62 +664,117 @@ button:disabled {
   font-size: 15px;
 }
 
-/* ---------- Mesas ---------- */
-.tables-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+/* ---------- Mesas: plano del local, cada mesa vista desde arriba ---------- */
+.large-title.with-action {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: 12px;
-  padding: 6px var(--gutter-r) 0 var(--gutter-l);
 }
-.table-tile {
-  min-height: 128px;
-  border-radius: 18px;
-  padding: 14px;
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--brand);
+  font-weight: 600;
+  font-size: 15px;
+  box-shadow: var(--shadow);
+  margin-bottom: 2px;
+}
+.theme-toggle:active {
+  transform: scale(0.96);
+}
+.floor {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 18px;
+  padding: 10px var(--gutter-r) 0 var(--gutter-l);
+}
+.table {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-  background: var(--surface);
-  border: 1.5px dashed var(--line);
+  align-items: center;
+  gap: 8px;
+  background: none;
   color: var(--text);
-  transition: transform 100ms ease-out;
+  padding: 0;
 }
-.table-tile.busy {
-  border: 1.5px solid transparent;
+.table-top {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 12px;
+  text-align: center;
   background: var(--surface);
-  box-shadow: var(--shadow), inset 0 0 0 1.5px var(--brand);
+  /* canto de la cubierta: una línea interior que se lee como el borde de la mesa */
+  box-shadow: inset 0 0 0 7px var(--surface), inset 0 0 0 8.5px var(--line), var(--shadow);
+  transition: transform 120ms ease-out;
 }
-.table-tile.ready {
-  box-shadow: var(--shadow), inset 0 0 0 2px var(--ok);
+.table-cuadrada .table-top {
+  border-radius: 18px;
+}
+.table-redonda .table-top {
+  border-radius: 50%;
+  padding: 18px;
+}
+.table-barra {
+  grid-column: 1 / -1;
+}
+.table-barra .table-top {
+  aspect-ratio: auto;
+  min-height: 92px;
+  border-radius: 46px;
+}
+.table:active .table-top {
+  transform: scale(0.96);
+}
+.table.busy .table-top {
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 7px var(--brand-soft), inset 0 0 0 9px var(--brand), var(--shadow);
+}
+.table.ready .table-top {
+  background: var(--ok-soft);
+  box-shadow: inset 0 0 0 7px var(--ok-soft), inset 0 0 0 9px var(--ok), var(--shadow);
 }
 .tt-name {
   font-weight: 700;
-  font-size: 19px;
+  font-size: 17px;
   letter-spacing: -0.01em;
 }
 .tt-free {
   color: var(--muted);
-  margin-top: auto;
-  font-size: 15px;
+  font-size: 14px;
 }
 .tt-total {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
   color: var(--brand);
   font-variant-numeric: tabular-nums;
-  margin-top: 4px;
+  letter-spacing: -0.01em;
+}
+.table.ready .tt-total {
+  color: var(--ok);
 }
 .tt-meta {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--muted);
 }
 .tt-badges {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
-  margin-top: auto;
-  padding-top: 6px;
+}
+.tt-badges:empty {
+  display: none;
 }
 
 /* ---------- Menú de la mesa ---------- */
@@ -1005,6 +1070,11 @@ button:disabled {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+.sheet-desc {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--text);
 }
 .sheet-note {
   font-size: 14px;

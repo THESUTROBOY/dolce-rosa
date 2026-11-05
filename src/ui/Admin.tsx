@@ -452,7 +452,7 @@ function ProductSheet({ product, categories, onClose, onSave, onRemove }: { prod
         <select id="p-cat" value={p.categoryId} onChange={(e) => setP({ ...p, categoryId: e.target.value })}>
           {categories.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} ({c.station === 'cocina' ? 'Cocina' : 'Barra'})
+              {c.name} ({c.station === 'cocina' ? 'Cocina' : 'Cafetería'})
             </option>
           ))}
         </select>

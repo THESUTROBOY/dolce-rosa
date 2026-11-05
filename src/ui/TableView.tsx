@@ -102,7 +102,7 @@ function MenuPane({ onPick }: { onPick(p: Product): void }) {
           <section key={c.id} id={`cat-${c.id}`} className="group">
             <h2 className="group-title">
               {c.name}
-              <span className={`station-tag st-${c.station}`}>{c.station === 'cocina' ? 'Cocina' : 'Barra'}</span>
+              <span className={`station-tag st-${c.station}`}>{c.station === 'cocina' ? 'Cocina' : 'Cafetería'}</span>
             </h2>
             <ul className="list">
               {prods.map((p) => (
@@ -114,7 +114,7 @@ function MenuPane({ onPick }: { onPick(p: Product): void }) {
                         {p.soldOut ? 'Agotado' : [p.description, p.extras.length ? `${p.extras.length} ${p.extras.length === 1 ? 'extra' : 'extras'}` : ''].filter(Boolean).join(' · ')}
                       </span>
                     </span>
-                    <span className="row-price">{p.variants.length ? `desde ${clp(Math.min(...p.variants.map((v) => v.price)))}` : clp(p.price)}</span>
+                    <span className="row-price">{priceLabel(p)}</span>
                     <span className="add-dot" aria-hidden>
                       +
                     </span>
@@ -130,6 +130,13 @@ function MenuPane({ onPick }: { onPick(p: Product): void }) {
   );
 }
 
+function priceLabel(p: Product) {
+  if (!p.variants.length) return clp(p.price);
+  const prices = p.variants.map((v) => v.price);
+  const min = Math.min(...prices);
+  return min === Math.max(...prices) ? clp(min) : `desde ${clp(min)}`;
+}
+
 const QUICK_NOTES = ['Sin azúcar', 'Con endulzante', 'Bien caliente', 'Tibio', 'Con hielo aparte', 'Sin crema', 'Para llevar', 'Separar salsa'];
 
 function AddSheet({ tableId, product, onClose }: { tableId: string; product: Product; onClose(): void }) {
@@ -141,6 +148,7 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
   const [note, setNote] = useState('');
   const unit = (variant ? product.variants.find((v) => v.name === variant)!.price : product.price) + extras.reduce((s, e) => s + (product.extras.find((x) => x.name === e)?.price ?? 0), 0);
   const station: Station = store.stationOf(product.id);
+  const samePrice = product.variants.every((v) => v.price === product.variants[0].price);
 
   return (
     <Sheet
@@ -162,17 +170,18 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
         </div>
       }
     >
+      {product.description && <p className="sheet-desc">{product.description}</p>}
       <p className="sheet-note">
         Va a <strong>{STATION_LABEL[station]}</strong> al enviar el pedido.
       </p>
       {product.variants.length > 0 && (
         <fieldset className="choice">
-          <legend>Tamaño</legend>
+          <legend>{samePrice ? 'Elige una opción' : 'Tamaño'}</legend>
           {product.variants.map((v) => (
             <label key={v.name} className={`choice-row ${variant === v.name ? 'on' : ''}`}>
               <input type="radio" name="variant" checked={variant === v.name} onChange={() => setVariant(v.name)} />
               <span>{v.name}</span>
-              <span className="choice-price">{clp(v.price)}</span>
+              {!samePrice && <span className="choice-price">{clp(v.price)}</span>}
             </label>
           ))}
         </fieldset>

@@ -25,9 +25,9 @@ describe('cálculos', () => {
 describe('mesa: pedido, comandas y detalle', () => {
   it('suma extras y separa automáticamente barra y cocina', () => {
     const { s, table, prod } = setup();
-    s.addLine(table.id, { productId: prod('Latte').id, variant: 'Grande', extras: ['Leche vegetal (avena)'], qty: 2, note: 'sin azúcar' });
-    const acc = s.addLine(table.id, { productId: prod('Waffle manjar plátano').id, extras: ['Helado'], qty: 1, note: '' });
-    expect(accountTotal(acc)).toBe((3400 + 600) * 2 + 4500 + 900);
+    s.addLine(table.id, { productId: prod('Latte').id, extras: ['Leche de almendras'], qty: 2, note: 'sin azúcar' });
+    const acc = s.addLine(table.id, { productId: prod('Tentación').id, extras: ['Bola de helado extra'], qty: 1, note: '' });
+    expect(accountTotal(acc)).toBe((3290 + 700) * 2 + 5490 + 990);
     const counts = s.send(acc.id);
     expect(counts).toEqual({ barra: 2, cocina: 1 });
     const coms = s.get().comandas;
@@ -51,7 +51,7 @@ describe('mesa: pedido, comandas y detalle', () => {
 
   it('pide tamaño, rechaza agotados y extras inventados', () => {
     const { s, table, prod } = setup();
-    expect(() => s.addLine(table.id, { productId: prod('Latte').id, extras: [], qty: 1, note: '' })).toThrow(/tamaño/);
+    expect(() => s.addLine(table.id, { productId: prod('Amanecer luco').id, extras: [], qty: 1, note: '' })).toThrow(/tamaño|opción|elige/i);
     expect(() => s.addLine(table.id, { productId: prod('Espresso').id, extras: ['Oro'], qty: 1, note: '' })).toThrow(/Extra/);
     s.setSoldOut(true, prod('Pie de limón').id, true);
     expect(() => s.addLine(table.id, { productId: prod('Pie de limón').id, extras: [], qty: 1, note: '' })).toThrow(/agotado/);
@@ -65,7 +65,7 @@ describe('mesa: pedido, comandas y detalle', () => {
     s.emit(acc.id, { tip: 200, paymentMethod: 'Débito', boleta: '123' });
     const e = s.get().accounts.find((a) => a.id === acc.id)!;
     expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', boleta: '123' });
-    expect(accountDue(e)).toBe(2000);
+    expect(accountDue(e)).toBe(2190);
     expect(s.openAccountFor(table.id)).toBeUndefined();
     // Un trabajador no puede tocar cuentas de otro turno.
     s.now = () => new Date('2026-11-06T10:00:00');

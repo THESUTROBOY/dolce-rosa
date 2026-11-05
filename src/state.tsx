@@ -1,19 +1,68 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { demoState } from './domain/demo';
 import { DomainError, localPersistence, Store } from './domain/store';
+import { dayKey, turnoOf } from './domain/calc';
 import type { AppState } from './domain/types';
 
-const store = new Store(localPersistence('dolce-rosa:v3'), () => demoState());
+const store = new Store(localPersistence('dolce-rosa:v4'), () => demoState());
 const StoreCtx = createContext(store);
 
 interface Ui {
   isAdmin: boolean;
   setAdmin(v: boolean): void;
   toast(msg: string, kind?: 'ok' | 'error'): void;
+  /** Tema visible: Día (mañana) o Tarde. Sigue al turno salvo que alguien lo cambie a mano. */
+  theme: Theme;
+  themeIsAuto: boolean;
+  toggleTheme(): void;
 }
+export type Theme = 'dia' | 'tarde';
 const UiCtx = createContext<Ui>(null!);
 
 const ADMIN_KEY = 'dolce-rosa:admin';
+const THEME_KEY = 'dolce-rosa:tema';
+
+/** Elección manual del tema, válida solo durante el turno en que se hizo. */
+function readThemeChoice(): { theme: Theme; shift: string } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(THEME_KEY) ?? 'null');
+    return v && (v.theme === 'dia' || v.theme === 'tarde') ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function useThemeState(afternoonStartsAt: number) {
+  const now = useNow(60000);
+  const turno = turnoOf(new Date(now), afternoonStartsAt);
+  const shift = `${dayKey(new Date(now))}-${turno}`;
+  const autoTheme: Theme = turno === 'tarde' ? 'tarde' : 'dia';
+  const [choice, setChoice] = useState(readThemeChoice);
+  const manual = choice && choice.shift === shift ? choice.theme : null;
+  const theme = manual ?? autoTheme;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme === 'tarde' ? 'dark' : 'light';
+    root.style.colorScheme = theme === 'tarde' ? 'dark' : 'light';
+    const color = getComputedStyle(root).getPropertyValue('--bg').trim();
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', color));
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    const next: Theme = theme === 'dia' ? 'tarde' : 'dia';
+    const c = next === autoTheme ? null : { theme: next, shift };
+    setChoice(c);
+    try {
+      if (c) localStorage.setItem(THEME_KEY, JSON.stringify(c));
+      else localStorage.removeItem(THEME_KEY);
+    } catch {
+      /* sin almacenamiento: el cambio dura hasta recargar */
+    }
+  }, [theme, autoTheme, shift]);
+
+  return { theme, themeIsAuto: !manual, toggleTheme };
+}
 
 export function Providers({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(() => {
@@ -42,9 +91,12 @@ export function Providers({ children }: { children: ReactNode }) {
     if (kind === 'error') navigator.vibrate?.(30);
   }, []);
 
+  const afternoon = useSyncExternalStore(store.subscribe, () => store.get().settings.afternoonStartsAt);
+  const themeState = useThemeState(afternoon);
+
   return (
     <StoreCtx.Provider value={store}>
-      <UiCtx.Provider value={{ isAdmin, setAdmin, toast }}>
+      <UiCtx.Provider value={{ isAdmin, setAdmin, toast, ...themeState }}>
         {children}
         <div className="toasts" role="status" aria-live="polite">
           {toasts.map((t) => (

@@ -30,7 +30,8 @@ export function demoState(now = new Date()): AppState {
   const station = (p: Product): Station => s.categories.find((c) => c.id === p.categoryId)!.station;
   const weighted: Product[] = s.products.flatMap((p) => {
     const c = s.categories.find((x) => x.id === p.categoryId)!.name;
-    return Array(c === 'Cafés' ? 6 : c === 'Tortas y pasteles' ? 3 : 2).fill(p);
+    const w: Record<string, number> = { 'Cafetería caliente': 5, 'Cafetería fría': 3, Pastelería: 2, Tortas: 3, Fondue: 1, Desayunos: 2 };
+    return Array(w[c] ?? 2).fill(p);
   });
   const tables = s.tables.filter((t) => t.name !== 'Barra');
 
@@ -145,8 +146,8 @@ export function demoState(now = new Date()): AppState {
       const ls = Array.from({ length: 2 + Math.floor(r() * 2) }, () => line(when));
       // Asegura que haya algo para cocina en las mesas con más pedidos.
       if (!ls.some((l) => l.station === 'cocina')) {
-        const w = s.products.find((p) => p.name.startsWith('Waffle Nutella'))!;
-        ls.push({ ...line(when), productId: w.id, name: w.name, variant: undefined, extras: ['Helado'], unitPrice: w.price + 900, station: 'cocina', note: '' });
+        const w = s.products.find((p) => p.name === 'Encanto')!;
+        ls.push({ ...line(when), productId: w.id, name: w.name, variant: undefined, extras: ['Bola de helado extra'], unitPrice: w.price + 990, station: 'cocina', note: '' });
       }
       a.lines.push(...ls);
       for (const st of ['cocina', 'barra'] as Station[]) {

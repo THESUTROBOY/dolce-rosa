@@ -1,2 +1,2 @@
-{ "name": "Dolce Rosa", "short_name": "Dolce Rosa", "start_url": "./", "display": "standalone", "background_color": "#f7f1f2", "theme_color": "#c2577a",
+{ "name": "Dolce Rosa", "short_name": "Dolce Rosa", "start_url": "./", "display": "standalone", "background_color": "#ffe2e2", "theme_color": "#c9447f",
   "icons": [{ "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }, { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }

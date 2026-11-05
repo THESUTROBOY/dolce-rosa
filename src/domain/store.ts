@@ -122,7 +122,7 @@ export class Store {
     if (p.soldOut) throw new DomainError(`${p.name} está agotado`);
     if (!(l.qty >= 1)) throw new DomainError('Cantidad inválida');
     const variant = l.variant ? p.variants.find((v) => v.name === l.variant) : undefined;
-    if (p.variants.length && !variant) throw new DomainError('Elige un tamaño');
+    if (p.variants.length && !variant) throw new DomainError('Elige una opción');
     const extrasPrice = l.extras.reduce((s, e) => {
       const x = p.extras.find((y) => y.name === e);
       if (!x) throw new DomainError(`Extra no válido: ${e}`);
