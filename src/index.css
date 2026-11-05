@@ -1433,6 +1433,11 @@ button:disabled {
     overflow-y: auto;
   }
 }
+.done-time {
+  font: 13px var(--font-receipt);
+  color: var(--muted);
+  margin-right: 10px;
+}
 .done-row {
   display: flex;
   justify-content: space-between;
