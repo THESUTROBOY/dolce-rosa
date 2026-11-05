@@ -16,6 +16,11 @@ export function netAndTax(total: number) {
 
 export const suggestedTip = (total: number, percent: number) => Math.round((total * percent) / 100 / 10) * 10;
 
+/** ID del detalle de cuenta con seis dígitos, ej. 000124. */
+export function folioLabel(folio?: number): string {
+  return folio ? String(folio).padStart(6, '0') : '—';
+}
+
 export function dayKey(d: Date | string): string {
   const x = typeof d === 'string' ? new Date(d) : d;
   const p = (n: number) => String(n).padStart(2, '0');

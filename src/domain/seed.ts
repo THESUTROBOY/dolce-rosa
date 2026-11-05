@@ -141,5 +141,6 @@ export function seedState(): AppState {
     audit: [],
     nextAccount: 1,
     nextComanda: 1,
+    nextFolio: 1,
   };
 }

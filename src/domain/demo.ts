@@ -185,6 +185,9 @@ export function demoState(now = new Date()): AppState {
   s.accounts = accounts;
   s.comandas = comandas;
   s.nextAccount = accounts.length + 1;
+  const emitted = accounts.filter((a) => a.emittedAt).sort((a, b) => a.emittedAt!.localeCompare(b.emittedAt!));
+  emitted.forEach((a, i) => (a.folio = i + 1));
+  s.nextFolio = emitted.length + 1;
   s.nextComanda = comandas.length + 1;
   return s;
 }

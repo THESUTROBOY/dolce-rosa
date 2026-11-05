@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { accountDue, accountTotal, clp, lineTotal, summarize } from '../domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, summarize } from '../domain/calc';
 import type { Account, Turno } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
 import { canPrint, useAction, useAppState, useStore, useUi } from '../state';
@@ -17,6 +17,8 @@ export function Accounts() {
   const [day, setDay] = useState(cur.day);
   const [turno, setTurno] = useState<TurnoSel>(cur.turno);
   const [onlyPending, setOnlyPending] = useState(false);
+  const [q, setQ] = useState('');
+  const qd = q.replace(/\D/g, '');
   const [open, setOpen] = useState<Account | null>(null);
 
   // Los trabajadores solo ven su turno de hoy.
@@ -26,16 +28,17 @@ export function Accounts() {
   const list = state.accounts
     .filter((a) => a.status !== 'abierta' && a.day === d && (t === 'todo' || a.turno === t))
     .filter((a) => !onlyPending || (a.status === 'emitida' && !a.checked))
+    .filter((a) => !qd || folioLabel(a.folio).includes(qd) || String(a.folio ?? '') === qd || (a.boleta ?? '').includes(qd))
     .sort((a, b) => (b.emittedAt ?? b.voidedAt ?? '').localeCompare(a.emittedAt ?? a.voidedAt ?? ''));
   const rawDate = new Date(d + 'T12:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
   const dateLabel = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
 
   const exportCsv = () => {
-    const rows: (string | number)[][] = [['N°', 'Fecha', 'Turno', 'Mesa', 'Estado', 'Consumo', 'Propina', 'Total', 'Medio de pago', 'Boleta', 'Cuadrada']];
+    const rows: (string | number)[][] = [['ID detalle', 'Fecha', 'Turno', 'Mesa', 'Estado', 'Consumo', 'Propina', 'Total', 'Medio de pago', 'Boleta', 'Cuadrada']];
     state.accounts
       .filter((a) => a.status !== 'abierta' && a.day === d && (t === 'todo' || a.turno === t))
       .forEach((a) =>
-        rows.push([a.number, a.day!, a.turno!, a.tableName, a.status, accountTotal(a), a.tip, accountDue(a), a.paymentMethod ?? '', a.boleta ?? '', a.checked ? 'sí' : 'no']),
+        rows.push([folioLabel(a.folio), a.day!, a.turno!, a.tableName, a.status, accountTotal(a), a.tip, accountDue(a), a.paymentMethod ?? '', a.boleta ?? '', a.checked ? 'sí' : 'no']),
       );
     downloadFile(`cuentas_${d}_${t}.csv`, toCsv(rows));
   };
@@ -89,6 +92,17 @@ export function Accounts() {
         </p>
       </div>
 
+      <div className="pad">
+        <input
+          className="search"
+          type="search"
+          inputMode="numeric"
+          placeholder="Buscar por ID de detalle o N° de boleta"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Buscar por ID de detalle o número de boleta"
+        />
+      </div>
       <div className="list-tools">
         <label className="toggle">
           <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
@@ -102,13 +116,15 @@ export function Accounts() {
       </div>
 
       {list.length === 0 ? (
-        <Empty title={onlyPending ? 'Nada por cuadrar' : 'Sin cuentas emitidas'}>Al emitir el detalle de una mesa, la cuenta aparece aquí.</Empty>
+        <Empty title={qd ? 'Sin resultados' : onlyPending ? 'Nada por cuadrar' : 'Sin cuentas emitidas'}>
+          {qd ? 'Revisa el número o cambia el día y el turno.' : 'Al emitir el detalle de una mesa, la cuenta aparece aquí.'}
+        </Empty>
       ) : (
         <ul className="list acc-list">
           {list.map((a) => (
             <li key={a.id} className={a.status === 'anulada' ? 'voided' : ''}>
               <button className="acc-row" onClick={() => setOpen(a)}>
-                <span className="acc-num">{a.number}</span>
+                <span className="acc-num">{folioLabel(a.folio)}</span>
                 <span className="row-main">
                   <span className="row-title">
                     {a.tableName}
@@ -153,7 +169,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
   const editable = a.status === 'emitida' && (isAdmin || (a.day === cur.day && a.turno === cur.turno));
 
   return (
-    <Sheet title={`Cuenta N° ${a.number} · ${a.tableName}`} onClose={onClose} size="tall">
+    <Sheet title={a.folio ? `Detalle ${folioLabel(a.folio)} · ${a.tableName}` : `${a.tableName} · sin emitir`} onClose={onClose} size="tall">
       <article className="receipt">
         <ul>
           {a.lines.map((l) => (
@@ -231,7 +247,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
       </div>
       {voiding && (
         <ReasonSheet
-          title={`Anular cuenta N° ${a.number}`}
+          title={a.folio ? `Anular detalle ${folioLabel(a.folio)}` : `Anular cuenta de ${a.tableName}`}
           onClose={() => setVoiding(false)}
           onConfirm={(r) => {
             if (run(() => (store.voidAccount(isAdmin, a.id, r), true), 'Cuenta anulada')) setVoiding(false);

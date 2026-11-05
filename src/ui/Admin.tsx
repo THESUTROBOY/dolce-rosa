@@ -5,7 +5,7 @@ import { seedState } from '../domain/seed';
 import { uid } from '../domain/store';
 import type { AppState, Category, Option, Product, Settings, Station, TableDef } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
-import { canPrint, useAction, useAppState, useStore, useUi } from '../state';
+import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
 import { downloadFile, MoneyField, PinPad, Segmented, Sheet, toCsv } from './kit';
 
 type Section = 'home' | 'reportes' | 'carta' | 'mesas' | 'ajustes' | 'datos';
@@ -15,6 +15,7 @@ export function Admin() {
   const { isAdmin, setAdmin, toast } = useUi();
   const [error, setError] = useState('');
   const [section, setSection] = useState<Section>('home');
+  const wide = useWide();
 
   if (!isAdmin) {
     return (
@@ -41,14 +42,69 @@ export function Admin() {
     );
   }
 
+  const titles: Record<Exclude<Section, 'home'>, string> = {
+    reportes: 'Reportes',
+    carta: 'Menú',
+    mesas: 'Mesas',
+    ajustes: 'Turnos, cobro y PIN',
+    datos: 'Datos y respaldo',
+  };
+  const content = (s: Exclude<Section, 'home'>) => (
+    <>
+      {s === 'reportes' && <Reports />}
+      {s === 'carta' && <MenuAdmin />}
+      {s === 'mesas' && <TablesAdmin />}
+      {s === 'ajustes' && <SettingsAdmin />}
+      {s === 'datos' && <DataAdmin />}
+    </>
+  );
+  const items: { s: Exclude<Section, 'home'>; title: string; sub: string }[] = [
+    { s: 'reportes', title: 'Reportes', sub: 'Ventas por día, turno, estación y producto' },
+    { s: 'carta', title: 'Menú', sub: 'Productos, precios, extras, agotados y estación' },
+    { s: 'mesas', title: 'Mesas', sub: 'Agregar, renombrar, ordenar o quitar mesas' },
+    { s: 'ajustes', title: 'Turnos, cobro y PIN', sub: 'Hora de cambio de turno, propina, medios de pago' },
+    { s: 'datos', title: 'Datos y respaldo', sub: 'Datos de prueba, respaldo y empezar de cero' },
+  ];
+
+  // En el computador: lista de secciones a la izquierda y la sección abierta a la derecha.
+  if (wide) {
+    const cur = section === 'home' ? 'reportes' : section;
+    return (
+      <div className="screen admin-split">
+        <aside className="admin-side">
+          <header className="large-title">
+            <h1>Configurar</h1>
+            <p className="subtitle">Modo administrador</p>
+          </header>
+          <ul className="list nav-list">
+            {items.map((i) => (
+              <li key={i.s}>
+                <button className={`row-btn ${cur === i.s ? 'on' : ''}`} aria-current={cur === i.s ? 'page' : undefined} onClick={() => setSection(i.s)}>
+                  <span className="row-main">
+                    <span className="row-title">{i.title}</span>
+                    <span className="row-sub">{i.sub}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="actions">
+            <button className="btn-secondary wide" onClick={() => setAdmin(false)}>
+              Salir del modo administrador
+            </button>
+          </div>
+        </aside>
+        <section className="admin-main" aria-label={titles[cur]}>
+          <header className="large-title">
+            <h1>{titles[cur]}</h1>
+          </header>
+          {content(cur)}
+        </section>
+      </div>
+    );
+  }
+
   if (section !== 'home') {
-    const titles: Record<Exclude<Section, 'home'>, string> = {
-      reportes: 'Reportes',
-      carta: 'Menú',
-      mesas: 'Mesas',
-      ajustes: 'Turnos, cobro y PIN',
-      datos: 'Datos y respaldo',
-    };
     return (
       <div className="screen">
         <header className="nav-bar">
@@ -60,22 +116,11 @@ export function Admin() {
           </div>
           <span className="nav-spacer" />
         </header>
-        {section === 'reportes' && <Reports />}
-        {section === 'carta' && <MenuAdmin />}
-        {section === 'mesas' && <TablesAdmin />}
-        {section === 'ajustes' && <SettingsAdmin />}
-        {section === 'datos' && <DataAdmin />}
+        {content(section)}
       </div>
     );
   }
 
-  const items: { s: Exclude<Section, 'home'>; title: string; sub: string }[] = [
-    { s: 'reportes', title: 'Reportes', sub: 'Ventas por día, turno, estación y producto' },
-    { s: 'carta', title: 'Menú', sub: 'Productos, precios, extras, agotados y estación' },
-    { s: 'mesas', title: 'Mesas', sub: 'Agregar, renombrar o quitar mesas' },
-    { s: 'ajustes', title: 'Turnos, cobro y PIN', sub: 'Hora de cambio de turno, propina, medios de pago' },
-    { s: 'datos', title: 'Datos y respaldo', sub: 'Datos de prueba, respaldo y empezar de cero' },
-  ];
   return (
     <div className="screen">
       <header className="large-title">
@@ -263,7 +308,11 @@ function MenuAdmin() {
   const { isAdmin, toast } = useUi();
   const [editing, setEditing] = useState<Product | null>(null);
   const [editingCat, setEditingCat] = useState<Category | null>(null);
+  const [q, setQ] = useState('');
   const cats = [...state.categories].sort((a, b) => a.sort - b.sort);
+  const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const match = (p: Product) => !q.trim() || norm(p.name).includes(norm(q.trim()));
+  const archived = state.products.filter((p) => p.archived && match(p));
   const blank = (categoryId: string): Product => ({ id: uid('prod'), categoryId, name: '', description: '', price: 0, variants: [], extras: [], soldOut: false, archived: false });
 
   return (
@@ -276,8 +325,10 @@ function MenuAdmin() {
           Nuevo producto
         </button>
       </div>
+      <input className="search admin-search" type="search" placeholder="Buscar producto" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar producto" />
+      <p className="hint">Toca un producto para cambiar su nombre, precio o extras, o para quitarlo. Toca el nombre de una categoría para editarla.</p>
       {cats.map((c) => (
-        <section key={c.id} className="group">
+        <section key={c.id} className="group" hidden={!!q.trim() && !state.products.some((p) => p.categoryId === c.id && !p.archived && match(p))}>
           <h2 className="group-title">
             <button className="title-btn" onClick={() => setEditingCat(c)}>
               {c.name}
@@ -286,7 +337,7 @@ function MenuAdmin() {
           </h2>
           <ul className="list">
             {state.products
-              .filter((p) => p.categoryId === c.id && !p.archived)
+              .filter((p) => p.categoryId === c.id && !p.archived && match(p))
               .map((p) => (
                 <li key={p.id} className="admin-prod">
                   <button className="row-btn" onClick={() => setEditing(structuredClone(p))}>
@@ -294,19 +345,55 @@ function MenuAdmin() {
                       <span className="row-title">{p.name}</span>
                       <span className="row-sub">
                         {p.variants.length ? p.variants.map((v) => `${v.name} ${clp(v.price)}`).join(' · ') : clp(p.price)}
-                        {p.extras.length ? ` · ${p.extras.length} extras` : ''}
+                        {p.extras.length ? ` · ${p.extras.length} ${p.extras.length === 1 ? 'extra' : 'extras'}` : ''}
                       </span>
                     </span>
                   </button>
+                  {p.variants.length === 0 && <InlinePrice key={p.price} product={p} />}
                   <label className="switch" title="Agotado">
                     <input type="checkbox" checked={p.soldOut} onChange={(e) => run(() => store.setSoldOut(isAdmin, p.id, e.target.checked))} aria-label={`${p.name} agotado`} />
                     <span>Agotado</span>
                   </label>
                 </li>
               ))}
+            {!q.trim() && (
+              <li>
+                <button className="row-btn add-row" onClick={() => setEditing(blank(c.id))}>
+                  <span className="add-dot" aria-hidden>
+                    +
+                  </span>
+                  <span className="row-title">Agregar producto en {c.name}</span>
+                </button>
+              </li>
+            )}
           </ul>
         </section>
       ))}
+      {archived.length > 0 && (
+        <section className="group">
+          <h2 className="group-title">Quitados del menú</h2>
+          <p className="hint">Tienen ventas, por eso se guardan para los reportes. Puedes devolverlos al menú.</p>
+          <ul className="list">
+            {archived.map((p) => (
+              <li key={p.id} className="admin-prod">
+                <span className="row-main pad-row">
+                  <span className="row-title">{p.name}</span>
+                  <span className="row-sub">{clp(p.price)}</span>
+                </span>
+                <button
+                  className="btn-plain"
+                  onClick={() => {
+                    const categoryId = state.categories.some((c) => c.id === p.categoryId) ? p.categoryId : cats[0]?.id;
+                    run(() => store.saveProduct(isAdmin, { ...p, categoryId, archived: false }), 'Volvió al menú');
+                  }}
+                >
+                  Volver al menú
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {editing && (
         <ProductSheet
           product={editing}
@@ -414,6 +501,28 @@ function OptionEditor({ label, hint, items, onChange, prefix }: { label: string;
   );
 }
 
+/** Cambio rápido de precio en el computador: se guarda al salir del campo o con Enter. */
+function InlinePrice({ product }: { product: Product }) {
+  const store = useStore();
+  const run = useAction();
+  const { isAdmin } = useUi();
+  const [v, setV] = useState(product.price);
+  const commit = () => {
+    if (v !== product.price) run(() => store.saveProduct(isAdmin, { ...product, price: v }), `${product.name}: ${clp(v)}`);
+  };
+  return (
+    <input
+      className="inline-price"
+      inputMode="numeric"
+      aria-label={`Precio de ${product.name}`}
+      value={'$' + v.toLocaleString('es-CL')}
+      onChange={(e) => setV(Number(e.target.value.replace(/\D/g, '') || 0))}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+    />
+  );
+}
+
 function ProductSheet({ product, categories, onClose, onSave, onRemove }: { product: Product; categories: Category[]; onClose(): void; onSave(p: Product): void; onRemove?(): void }) {
   const [p, setP] = useState(product);
   return (
@@ -475,27 +584,53 @@ function TablesAdmin() {
   const store = useStore();
   const run = useAction();
   const { isAdmin } = useUi();
-  const [tables, setTables] = useState<TableDef[]>(state.tables);
+  // Cada cambio se guarda al tiro; el nombre se guarda al salir del campo.
+  const [names, setNames] = useState<Record<string, string>>({});
+  const save = (tables: TableDef[], msg?: string) => run(() => (store.saveTables(isAdmin, tables), true), msg);
+  const nextName = () => {
+    let n = 1;
+    while (state.tables.some((t) => t.name.toLowerCase() === `mesa ${n}`)) n++;
+    return `Mesa ${n}`;
+  };
+  const move = (i: number, d: number) => {
+    const t = [...state.tables];
+    [t[i], t[i + d]] = [t[i + d], t[i]];
+    save(t);
+  };
   return (
     <div className="admin-pad">
+      <p className="hint">Los cambios se guardan solos. Una mesa con cuenta abierta no se puede quitar hasta emitir su detalle.</p>
       <ul className="list">
-        {tables.map((t, i) => (
-          <li key={t.id} className="opt-edit">
-            <input id={`mesa-${t.id}`} aria-label="Nombre de la mesa" value={t.name} onChange={(e) => setTables(tables.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-            <button className="btn-plain danger" onClick={() => setTables(tables.filter((_, j) => j !== i))}>
+        {state.tables.map((t, i) => (
+          <li key={t.id} className="opt-edit table-edit">
+            <input
+              id={`mesa-${t.id}`}
+              aria-label="Nombre de la mesa"
+              value={names[t.id] ?? t.name}
+              onChange={(e) => setNames({ ...names, [t.id]: e.target.value })}
+              onBlur={() => {
+                const name = names[t.id];
+                if (name === undefined || name.trim() === t.name) return;
+                if (!save(state.tables.map((x) => (x.id === t.id ? { ...x, name } : x)), 'Nombre guardado')) return;
+                setNames(({ [t.id]: _, ...rest }) => rest);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+            <button className="icon-btn" aria-label={`Subir ${t.name}`} disabled={i === 0} onClick={() => move(i, -1)}>
+              ↑
+            </button>
+            <button className="icon-btn" aria-label={`Bajar ${t.name}`} disabled={i === state.tables.length - 1} onClick={() => move(i, 1)}>
+              ↓
+            </button>
+            <button className="btn-plain danger" onClick={() => save(state.tables.filter((x) => x.id !== t.id), `${t.name} quitada`)}>
               Quitar
             </button>
           </li>
         ))}
       </ul>
-      <div className="btn-pair">
-        <button className="btn-secondary" onClick={() => setTables([...tables, { id: uid('mesa'), name: `Mesa ${tables.length + 1}` }])}>
-          Agregar mesa
-        </button>
-        <button className="btn-primary" onClick={() => run(() => store.saveTables(isAdmin, tables), 'Mesas guardadas')}>
-          Guardar
-        </button>
-      </div>
+      <button className="btn-primary wide" onClick={() => save([...state.tables, { id: uid('mesa'), name: nextName() }], 'Mesa agregada')}>
+        Agregar mesa
+      </button>
     </div>
   );
 }

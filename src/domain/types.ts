@@ -59,6 +59,8 @@ export interface Account {
   tableId: string;
   tableName: string;
   status: AccountStatus;
+  /** ID del detalle de cuenta: correlativo, se asigna al emitir y nunca se repite (las anuladas lo conservan). */
+  folio?: number;
   lines: Line[];
   openedAt: string;
   emittedAt?: string;
@@ -131,4 +133,5 @@ export interface AppState {
   audit: AuditEntry[];
   nextAccount: number;
   nextComanda: number;
+  nextFolio: number;
 }

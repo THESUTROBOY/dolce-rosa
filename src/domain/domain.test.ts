@@ -64,7 +64,12 @@ describe('mesa: pedido, comandas y detalle', () => {
     s.send(acc.id);
     s.emit(acc.id, { tip: 200, paymentMethod: 'Débito', boleta: '123' });
     const e = s.get().accounts.find((a) => a.id === acc.id)!;
-    expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', boleta: '123' });
+    expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', boleta: '123', folio: 1 });
+    // El siguiente detalle toma el número siguiente, aunque sea de otra mesa.
+    const other = s.addLine(s.get().tables[1].id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    s.send(other.id);
+    s.emit(other.id, { tip: 0, paymentMethod: 'Efectivo' });
+    expect(s.get().accounts.find((a) => a.id === other.id)!.folio).toBe(2);
     expect(accountDue(e)).toBe(2190);
     expect(s.openAccountFor(table.id)).toBeUndefined();
     // Un trabajador no puede tocar cuentas de otro turno.
@@ -98,5 +103,9 @@ describe('datos de prueba', () => {
     for (const a of st.accounts.filter((x) => x.status === 'abierta'))
       for (const l of a.lines) if (l.sentAt) expect(st.comandas.some((c) => c.id === l.comandaId)).toBe(true);
     expect(st.accounts.every((a) => a.status !== 'emitida' || a.emittedAt! <= now.toISOString())).toBe(true);
+    // Cada detalle emitido tiene un ID único y correlativo.
+    const folios = st.accounts.filter((a) => a.emittedAt).map((a) => a.folio!).sort((x, y) => x - y);
+    expect(folios).toEqual(folios.map((_, i) => i + 1));
+    expect(st.nextFolio).toBe(folios.length + 1);
   });
 });

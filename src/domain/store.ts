@@ -1,4 +1,4 @@
-import { dayKey, turnoOf } from './calc';
+import { dayKey, folioLabel, turnoOf } from './calc';
 import { seedState } from './seed';
 import type { Account, AppState, Category, Comanda, ComandaStatus, Line, Product, Settings, Station, TableDef } from './types';
 
@@ -9,12 +9,18 @@ export interface Persistence {
   watch?(fn: (s: AppState) => void): void;
 }
 
+/** Respaldos anteriores al ID de detalle: continúa la numeración desde el mayor existente. */
+function withFolio(s: AppState): AppState {
+  if (!s.nextFolio) s.nextFolio = Math.max(0, ...s.accounts.map((a) => a.folio ?? 0)) + 1;
+  return s;
+}
+
 export const localPersistence = (key: string): Persistence => ({
   load() {
     try {
       const raw = localStorage.getItem(key);
       const s = raw ? (JSON.parse(raw) as AppState) : null;
-      return s?.version === 2 ? s : null;
+      return s?.version === 2 ? withFolio(s) : null;
     } catch {
       return null;
     }
@@ -268,6 +274,7 @@ export class Store {
     this.commit((d) => {
       const acc = d.accounts.find((x) => x.id === accountId)!;
       acc.status = 'emitida';
+      acc.folio = d.nextFolio++;
       acc.emittedAt = this.iso();
       acc.day = day;
       acc.turno = turno;
@@ -318,7 +325,7 @@ export class Store {
           c.status = 'entregado';
           c.updatedAt = this.iso();
         });
-      this.log(d, 'Anular cuenta', `${acc.tableName} cuenta ${acc.number}: ${reason}`);
+      this.log(d, 'Anular cuenta', `${acc.tableName} ${acc.folio ? `detalle ${folioLabel(acc.folio)}` : 'cuenta abierta'}: ${reason}`);
     });
   }
 
@@ -405,6 +412,6 @@ export class Store {
   replaceAll(isAdmin: boolean, next: AppState) {
     this.admin(isAdmin);
     if (next.version !== 2 || !Array.isArray(next.accounts)) throw new DomainError('El archivo no es un respaldo válido');
-    this.commit((d) => Object.assign(d, next));
+    this.commit((d) => Object.assign(d, withFolio(next)));
   }
 }

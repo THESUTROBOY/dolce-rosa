@@ -1,4 +1,4 @@
-import { accountDue, accountTotal, clp, lineTotal, netAndTax } from './domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax } from './domain/calc';
 import type { Account, Comanda, Settings } from './domain/types';
 import { STATION_LABEL } from './domain/types';
 
@@ -22,7 +22,7 @@ export function accountHtml(a: Account, s: Settings) {
   return `<style>${PAGE}</style><h1>${esc(s.businessName)}</h1>
   ${s.address ? `<div class="c s">${esc(s.address)}</div>` : ''}${s.phone ? `<div class="c s">${esc(s.phone)}</div>` : ''}
   <hr><div class="c"><b>DETALLE DE CUENTA</b></div>
-  <div class="r"><span>${esc(a.tableName)} · N° ${a.number}</span><span>${when(a.emittedAt ?? new Date().toISOString())}</span></div><hr>
+  <div class="r"><span>${esc(a.tableName)} · ${a.folio ? `N° ${folioLabel(a.folio)}` : 'PRECUENTA'}</span><span>${when(a.emittedAt ?? new Date().toISOString())}</span></div><hr>
   ${lines}<hr>
   <div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>
   <div class="r s"><span>Neto ${clp(neto)}</span><span>IVA ${clp(iva)}</span></div>

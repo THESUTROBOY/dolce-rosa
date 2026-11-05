@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { accountDue, accountTotal, clp, lineTotal, netAndTax, suggestedTip } from '../domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, suggestedTip } from '../domain/calc';
 import type { Account, Comanda, Line, Product, Station } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
-import { canPrint, useAction, useAppState, useStore, useUi } from '../state';
+import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
 import { MoneyField, Segmented, Sheet, Stepper } from './kit';
 
 type Pane = 'menu' | 'cuenta';
@@ -16,6 +16,7 @@ export function TableView({ tableId, onBack }: { tableId: string; onBack(): void
   const [adding, setAdding] = useState<Product | null>(null);
   const [sending, setSending] = useState(false);
   const [emitted, setEmitted] = useState<Account | null>(null);
+  const wide = useWide();
 
   if (emitted) return <EmittedView account={emitted} onDone={onBack} />;
   if (!table) return null;
@@ -35,6 +36,29 @@ export function TableView({ tableId, onBack }: { tableId: string; onBack(): void
         </div>
         <span className="nav-spacer" />
       </header>
+      {wide ? (
+        <div className="table-split">
+          <div className="split-main">
+            <MenuPane onPick={setAdding} />
+          </div>
+          <aside className="split-side" aria-label="Detalle de cuenta">
+            <h2 className="group-title">Detalle de cuenta{count ? ` · ${count}` : ''}</h2>
+            {unsent.length > 0 && account && (
+              <div className="send-bar send-inline">
+                <div>
+                  <strong>{unsent.reduce((s, l) => s + l.qty, 0)} por enviar</strong>
+                  <span>{clp(unsent.reduce((s, l) => s + lineTotal(l), 0))}</span>
+                </div>
+                <button className="btn-primary" onClick={() => setSending(true)}>
+                  Revisar y enviar
+                </button>
+              </div>
+            )}
+            <AccountPane account={account} onEmitted={setEmitted} onGoMenu={() => document.querySelector<HTMLInputElement>('.menu-pane input')?.focus()} />
+          </aside>
+        </div>
+      ) : (
+        <>
       <div className="pane-switch">
         <Segmented<Pane>
           label="Sección de la mesa"
@@ -61,6 +85,8 @@ export function TableView({ tableId, onBack }: { tableId: string; onBack(): void
             Revisar y enviar
           </button>
         </div>
+      )}
+        </>
       )}
 
       {adding && (
@@ -363,7 +389,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
         <header>
           <strong>{state.settings.businessName}</strong>
           <span>
-            {account.tableName} · Cuenta N° {account.number}
+            {account.tableName} · Cuenta abierta
           </span>
         </header>
         <ul>
@@ -585,12 +611,12 @@ function EmittedView({ account, onDone }: { account: Account; onDone(): void }) 
       </div>
       <h1>Detalle emitido</h1>
       <p className="subtitle">
-        {account.tableName} quedó libre. La cuenta N° {account.number} está en Cuentas del turno {account.turno}.
+        {account.tableName} quedó libre. El detalle {folioLabel(account.folio)} está en Cuentas del turno {account.turno}.
       </p>
       <article className="receipt">
         <header>
           <strong>{state.settings.businessName}</strong>
-          <span>Detalle de cuenta N° {account.number}</span>
+          <span>Detalle de cuenta N° {folioLabel(account.folio)}</span>
         </header>
         <ul>
           {account.lines.map((l) => (

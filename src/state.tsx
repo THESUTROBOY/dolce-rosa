@@ -137,6 +137,19 @@ export function useAction() {
 }
 
 /** Reloj que se actualiza cada `ms` para mostrar tiempos transcurridos. */
+/** Pantalla de computador o tablet grande: navegación lateral y paneles lado a lado. */
+const WIDE = '(min-width: 1024px)';
+export function useWide() {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia(WIDE);
+      m.addEventListener('change', cb);
+      return () => m.removeEventListener('change', cb);
+    },
+    () => window.matchMedia(WIDE).matches,
+  );
+}
+
 export function useNow(ms = 30000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
