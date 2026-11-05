@@ -1,4 +1,4 @@
-import { accountTotal, clp } from '../domain/calc';
+import { accountTotal, clp, occupiesTable } from '../domain/calc';
 import type { TableDef } from '../domain/types';
 import { ago, useAppState, useNow, useUi } from '../state';
 
@@ -28,7 +28,7 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
   const state = useAppState();
   const now = useNow();
   const { theme, themeIsAuto, toggleTheme } = useUi();
-  const open = state.accounts.filter((a) => a.status === 'abierta');
+  const open = state.accounts.filter(occupiesTable);
   const busy = open.length;
 
   return (
@@ -61,7 +61,7 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
           return (
             <button
               key={t.id}
-              className={`table table-${shape} ${a ? 'busy' : ''} ${ready ? 'ready' : ''}`}
+              className={`table table-${shape} ${a ? 'busy' : ''} ${ready ? 'ready' : ''} ${a?.status === 'emitida' ? 'pending' : ''}`}
               onClick={() => onOpen(t.id)}
               aria-label={`${t.name}, ${a ? `ocupada, ${clp(accountTotal(a))}` : 'libre'}`}
             >
@@ -82,6 +82,7 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
                 {ready > 0 && <span className="pill pill-ok">Listo para servir</span>}
                 {cooking > 0 && <span className="pill pill-warn">En preparación</span>}
                 {unsent > 0 && <span className="pill pill-brand">Sin enviar</span>}
+                {a?.status === 'emitida' && <span className="pill pill-warn">Por cobrar</span>}
               </span>
             </button>
           );

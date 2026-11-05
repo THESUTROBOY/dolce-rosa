@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, suggestedTip } from '../domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, occupiesTable, suggestedTip } from '../domain/calc';
 import type { Account, Comanda, Line, Product, Station } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
@@ -11,14 +11,15 @@ type Pane = 'menu' | 'cuenta';
 export function TableView({ tableId, onBack }: { tableId: string; onBack(): void }) {
   const state = useAppState();
   const table = state.tables.find((t) => t.id === tableId);
-  const account = state.accounts.find((a) => a.tableId === tableId && a.status === 'abierta');
+  const account = state.accounts.find((a) => a.tableId === tableId && occupiesTable(a));
+  const pending = !!account && account.status === 'emitida';
   const [pane, setPane] = useState<Pane>(account ? 'cuenta' : 'menu');
   const [adding, setAdding] = useState<Product | null>(null);
   const [sending, setSending] = useState(false);
   const [emitted, setEmitted] = useState<Account | null>(null);
   const wide = useWide();
 
-  if (emitted) return <EmittedView account={emitted} onDone={onBack} />;
+  if (emitted) return <PaidView account={emitted} onDone={onBack} />;
   if (!table) return null;
 
   const unsent = account?.lines.filter((l) => !l.sentAt) ?? [];
@@ -36,7 +37,11 @@ export function TableView({ tableId, onBack }: { tableId: string; onBack(): void
         </div>
         <span className="nav-spacer" />
       </header>
-      {wide ? (
+      {pending ? (
+        <div className="pending-pane">
+          <AccountPane account={account} onEmitted={setEmitted} onGoMenu={() => setPane('menu')} />
+        </div>
+      ) : wide ? (
         <div className="table-split">
           <div className="split-main">
             <MenuPane onPick={setAdding} />
@@ -363,7 +368,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
   const store = useStore();
   const run = useAction();
   const { isAdmin } = useUi();
-  const [emitOpen, setEmitOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState<Line | null>(null);
   const comandas = useMemo(() => new Map<string, Comanda>(state.comandas.map((c) => [c.id, c])), [state.comandas]);
@@ -382,15 +387,24 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
   const total = accountTotal(account);
   const { neto, iva } = netAndTax(total);
   const hasUnsent = account.lines.some((l) => !l.sentAt);
+  const pending = account.status === 'emitida';
+  const suggested = suggestedTip(total, state.settings.tipPercent);
+  const emitNow = () => {
+    const ok = run(() => (store.emit(account.id), true));
+    if (!ok) return;
+    navigator.vibrate?.([10, 40, 10]);
+    // Se imprime en el mismo toque para que el navegador no lo bloquee.
+    const done = store.get().accounts.find((a) => a.id === account.id);
+    if (done && canPrint && state.settings.printOnEmit !== false) printHtml(accountHtml(done, state.settings));
+  };
 
   return (
     <div className="account-pane">
       <article className="receipt" aria-label="Detalle de cuenta">
         <header>
           <strong>{state.settings.businessName}</strong>
-          <span>
-            {account.tableName} · Cuenta abierta
-          </span>
+          <span>{pending ? `Detalle de cuenta N° ${folioLabel(account.folio)}` : `${account.tableName} · Cuenta abierta`}</span>
+          {pending && <span>{account.tableName}</span>}
         </header>
         <ul>
           {account.lines.map((l) => {
@@ -408,7 +422,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
                 {l.note && <div className="rc-sub rc-note">“{l.note}”</div>}
                 <div className="rc-meta">
                   <span className={`pill ${LINE_STATE[st].cls}`}>{LINE_STATE[st].label}</span>
-                  {isAdmin && l.sentAt && (
+                  {isAdmin && l.sentAt && !pending && (
                     <button className="btn-plain danger small" onClick={() => setRemoving(l)}>
                       Quitar
                     </button>
@@ -428,29 +442,56 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
             <span>IVA {clp(iva)}</span>
           </div>
           {state.settings.tipPercent > 0 && (
-            <div className="rc-line rc-small">
-              <span>Propina sugerida {state.settings.tipPercent}%</span>
-              <span>{clp(suggestedTip(total, state.settings.tipPercent))}</span>
-            </div>
+            <>
+              <div className="rc-line rc-small">
+                <span>Propina sugerida {state.settings.tipPercent}%</span>
+                <span>{clp(suggested)}</span>
+              </div>
+              <div className="rc-line rc-small">
+                <span>Total con propina</span>
+                <span>{clp(total + suggested)}</span>
+              </div>
+            </>
           )}
         </footer>
       </article>
 
       <div className="actions">
-        {hasUnsent && <p className="hint">Hay productos sin enviar. Envíalos antes de emitir el detalle.</p>}
-        <button className="btn-primary wide" disabled={hasUnsent} onClick={() => setEmitOpen(true)}>
-          Emitir detalle de cuenta
-        </button>
-        <div className="btn-pair">
-          <button className="btn-secondary" onClick={() => setMoving(true)}>
-            Cambiar de mesa
-          </button>
-          {canPrint && (
-            <button className="btn-secondary" onClick={() => printHtml(accountHtml(account, state.settings))}>
-              Imprimir precuenta
+        {pending ? (
+          <>
+            <p className="pending-note">
+              <span className="pill pill-warn">Por cobrar</span> El detalle ya se entregó. Cuando paguen, registra el pago y la mesa queda libre.
+            </p>
+            {!canPrint && <p className="hint">En esta vista de prueba no se puede imprimir. En la app instalada en el local, el detalle se imprime solo al emitir.</p>}
+            <button className="btn-primary wide" onClick={() => setPayOpen(true)}>
+              Registrar pago
             </button>
-          )}
-        </div>
+            <div className="btn-pair">
+              <button className="btn-secondary" onClick={() => run(() => store.reopen(account.id), 'Cuenta reabierta: agrega lo que falte y vuelve a emitir')}>
+                Reabrir para agregar
+              </button>
+              {canPrint ? (
+                <button className="btn-secondary" onClick={() => printHtml(accountHtml(account, state.settings))}>
+                  Imprimir de nuevo
+                </button>
+              ) : (
+                <button className="btn-secondary" onClick={() => setMoving(true)}>
+                  Cambiar de mesa
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {hasUnsent && <p className="hint">Hay productos sin enviar. Envíalos antes de emitir el detalle.</p>}
+            <button className="btn-primary wide" disabled={hasUnsent} onClick={emitNow}>
+              {canPrint && state.settings.printOnEmit !== false ? 'Emitir e imprimir detalle' : 'Emitir detalle de cuenta'}
+            </button>
+            <button className="btn-secondary wide" onClick={() => setMoving(true)}>
+              Cambiar de mesa
+            </button>
+          </>
+        )}
         {isAdmin && (
           <button className="btn-plain danger" onClick={() => setRemoving({ id: '__all__' } as Line)}>
             Anular cuenta completa
@@ -458,12 +499,12 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
         )}
       </div>
 
-      {emitOpen && (
-        <EmitSheet
+      {payOpen && (
+        <PaySheet
           account={account}
-          onClose={() => setEmitOpen(false)}
+          onClose={() => setPayOpen(false)}
           onDone={() => {
-            setEmitOpen(false);
+            setPayOpen(false);
             onEmitted(store.get().accounts.find((a) => a.id === account.id)!);
           }}
         />
@@ -529,7 +570,7 @@ export function ReasonSheet({ title, onClose, onConfirm }: { title: string; onCl
   );
 }
 
-function EmitSheet({ account, onClose, onDone }: { account: Account; onClose(): void; onDone(): void }) {
+export function PaySheet({ account, onClose, onDone }: { account: Account; onClose(): void; onDone(): void }) {
   const state = useAppState();
   const store = useStore();
   const run = useAction();
@@ -543,7 +584,7 @@ function EmitSheet({ account, onClose, onDone }: { account: Account; onClose(): 
 
   return (
     <Sheet
-      title="Emitir detalle de cuenta"
+      title={`Registrar pago · ${folioLabel(account.folio)}`}
       onClose={onClose}
       size="tall"
       footer={
@@ -551,17 +592,14 @@ function EmitSheet({ account, onClose, onDone }: { account: Account; onClose(): 
           className="btn-primary wide"
           disabled={!method}
           onClick={() => {
-            const ok = run(() => (store.emit(account.id, { tip, paymentMethod: method, boleta }), true));
+            const ok = run(() => (store.pay(account.id, { tip, paymentMethod: method, boleta }), true));
             if (ok) {
               navigator.vibrate?.([10, 40, 10]);
-              // Se imprime en el mismo toque para que el navegador no lo bloquee.
-              const done = store.get().accounts.find((a) => a.id === account.id);
-              if (done && canPrint && state.settings.printOnEmit !== false) printHtml(accountHtml(done, state.settings));
               onDone();
             }
           }}
         >
-          {method ? `Emitir · ${clp(total + tip)}` : 'Elige el medio de pago'}
+          {method ? `Registrar pago · ${clp(total + tip)}` : 'Elige el medio de pago'}
         </button>
       }
     >
@@ -605,14 +643,14 @@ function EmitSheet({ account, onClose, onDone }: { account: Account; onClose(): 
   );
 }
 
-function EmittedView({ account, onDone }: { account: Account; onDone(): void }) {
+function PaidView({ account, onDone }: { account: Account; onDone(): void }) {
   const state = useAppState();
   return (
     <div className="screen emitted">
       <div className="emitted-check" aria-hidden>
         ✓
       </div>
-      <h1>Detalle emitido</h1>
+      <h1>Pago registrado</h1>
       <p className="subtitle">
         {account.tableName} quedó libre. El detalle {folioLabel(account.folio)} está en Cuentas del turno {account.turno}.
       </p>
@@ -656,9 +694,7 @@ function EmittedView({ account, onDone }: { account: Account; onDone(): void }) 
           <button className="btn-secondary wide" onClick={() => printHtml(accountHtml(account, state.settings))}>
             Imprimir de nuevo
           </button>
-        ) : (
-          <p className="hint center">En esta vista de prueba no se puede imprimir. En la app instalada en el local, la impresión se abre sola al emitir.</p>
-        )}
+        ) : null}
         <button className="btn-primary wide" onClick={onDone}>
           Volver a mesas
         </button>

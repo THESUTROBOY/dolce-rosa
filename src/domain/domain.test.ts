@@ -57,21 +57,36 @@ describe('mesa: pedido, comandas y detalle', () => {
     expect(() => s.addLine(table.id, { productId: prod('Pie de limón').id, extras: [], qty: 1, note: '' })).toThrow(/agotado/);
   });
 
-  it('emite el detalle en el turno correcto y libera la mesa', () => {
+  it('emite el detalle antes del pago, cobra después y recién ahí libera la mesa', () => {
     const { s, table, prod } = setup('2026-11-05T16:20:00');
     const acc = s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
-    expect(() => s.emit(acc.id, { tip: 0, paymentMethod: 'Débito' })).toThrow(/sin enviar/);
+    expect(() => s.emit(acc.id)).toThrow(/sin enviar/);
     s.send(acc.id);
-    s.emit(acc.id, { tip: 200, paymentMethod: 'Débito', boleta: '123' });
-    const e = s.get().accounts.find((a) => a.id === acc.id)!;
-    expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', boleta: '123', folio: 1 });
+    s.emit(acc.id);
+    let e = s.get().accounts.find((a) => a.id === acc.id)!;
+    expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', folio: 1 });
+    expect(e.paymentMethod).toBeUndefined();
+    // Emitido pero sin cobrar: la mesa sigue ocupada y no acepta productos nuevos.
+    expect(s.openAccountFor(table.id)?.id).toBe(acc.id);
+    expect(() => s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' })).toThrow(/Reábrelo/);
+    // Reabrir para agregar algo conserva el ID del detalle.
+    s.reopen(acc.id);
+    s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    s.send(acc.id);
+    s.emit(acc.id);
+    expect(s.get().accounts.find((a) => a.id === acc.id)!.folio).toBe(1);
+    expect(() => s.pay(acc.id, { tip: 0, paymentMethod: '' })).toThrow(/medio de pago/);
+    s.pay(acc.id, { tip: 400, paymentMethod: 'Débito', boleta: '123' });
+    e = s.get().accounts.find((a) => a.id === acc.id)!;
+    expect(e).toMatchObject({ paymentMethod: 'Débito', boleta: '123', tip: 400 });
+    expect(accountDue(e)).toBe(1990 * 2 + 400);
+    expect(s.openAccountFor(table.id)).toBeUndefined();
+    expect(() => s.pay(acc.id, { tip: 0, paymentMethod: 'Efectivo' })).toThrow(/ya está pagado/);
     // El siguiente detalle toma el número siguiente, aunque sea de otra mesa.
     const other = s.addLine(s.get().tables[1].id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
     s.send(other.id);
-    s.emit(other.id, { tip: 0, paymentMethod: 'Efectivo' });
+    s.emit(other.id);
     expect(s.get().accounts.find((a) => a.id === other.id)!.folio).toBe(2);
-    expect(accountDue(e)).toBe(2190);
-    expect(s.openAccountFor(table.id)).toBeUndefined();
     // Un trabajador no puede tocar cuentas de otro turno.
     s.now = () => new Date('2026-11-06T10:00:00');
     expect(() => s.updateEmitted(false, acc.id, { checked: true })).toThrow(/tu turno/);
@@ -97,6 +112,7 @@ describe('datos de prueba', () => {
     expect(sum.count).toBeGreaterThan(700);
     expect(sum.byTurno.every((t) => t.count > 0)).toBe(true);
     expect(st.accounts.filter((a) => a.status === 'abierta')).toHaveLength(5);
+    expect(st.accounts.filter((a) => a.status === 'emitida' && !a.paidAt)).toHaveLength(1);
     const kitchen = st.comandas.filter((c) => c.station === 'cocina' && c.status !== 'entregado');
     expect(kitchen.length).toBeGreaterThanOrEqual(3);
     // Las líneas de cuentas abiertas apuntan a comandas existentes.

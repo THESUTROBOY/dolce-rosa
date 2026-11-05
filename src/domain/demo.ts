@@ -91,6 +91,7 @@ export function demoState(now = new Date()): AppState {
         lines,
         openedAt: open.toISOString(),
         emittedAt: close.toISOString(),
+        paidAt: new Date(close.getTime() + (2 + r() * 6) * 60000).toISOString(),
         day: dayKey(close),
         turno: turnoOf(close, s.settings.afternoonStartsAt),
         tip: 0,
@@ -171,7 +172,12 @@ export function demoState(now = new Date()): AppState {
     }
     for (let i = 0; i < unsent; i++) a.lines.push(line(minsAgo(1), false));
     accounts.push(a);
+    return a;
   };
+  // Mesa 6 ya pidió la cuenta: detalle emitido, falta cobrar.
+  const m6 = openTable('Mesa 6', [{ ago: 38, status: 'entregado' }]);
+  const emittedAt = minsAgo(3);
+  Object.assign(m6, { status: 'emitida', emittedAt: emittedAt.toISOString(), day: dayKey(emittedAt), turno: turnoOf(emittedAt, s.settings.afternoonStartsAt) });
   openTable('Mesa 2', [{ ago: 42, status: 'entregado' }]);
   openTable('Mesa 3', [{ ago: 18, status: 'listo' }]);
   openTable('Mesa 5', [{ ago: 9, status: 'preparando' }]);

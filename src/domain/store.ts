@@ -1,4 +1,4 @@
-import { dayKey, folioLabel, turnoOf } from './calc';
+import { dayKey, folioLabel, occupiesTable, turnoOf } from './calc';
 import { seedState } from './seed';
 import type { Account, AppState, Category, Comanda, ComandaStatus, Line, Product, Settings, Station, TableDef } from './types';
 
@@ -101,8 +101,9 @@ export class Store {
   }
 
   // ---------- Consultas ----------
+  /** La cuenta que ocupa la mesa: abierta, o con el detalle emitido y aún por cobrar. */
   openAccountFor(tableId: string): Account | undefined {
-    return this.state.accounts.find((a) => a.tableId === tableId && a.status === 'abierta');
+    return this.state.accounts.find((a) => a.tableId === tableId && occupiesTable(a));
   }
 
   stationOf(productId: string): Station {
@@ -146,7 +147,9 @@ export class Store {
       station: this.stationOf(p.id),
       addedAt: this.iso(),
     };
-    let accountId = this.openAccountFor(tableId)?.id;
+    const current = this.openAccountFor(tableId);
+    if (current && current.status !== 'abierta') throw new DomainError('La mesa tiene el detalle emitido. Reábrelo para agregar productos');
+    let accountId = current?.id;
     this.commit((d) => {
       let acc = d.accounts.find((a) => a.id === accountId);
       if (!acc) {
@@ -254,7 +257,7 @@ export class Store {
     if (this.openAccountFor(tableId)) throw new DomainError(`${table.name} ya tiene una cuenta abierta`);
     this.commit((d) => {
       const acc = d.accounts.find((x) => x.id === accountId);
-      if (!acc || acc.status !== 'abierta') return;
+      if (!acc || !occupiesTable(acc)) return;
       const from = acc.tableName;
       acc.tableId = table.id;
       acc.tableName = table.name;
@@ -263,24 +266,24 @@ export class Store {
     });
   }
 
-  /** Emite el detalle de cuenta: cierra la mesa y la deja en el turno actual. */
-  emit(accountId: string, opts: { tip: number; paymentMethod: string; boleta?: string }) {
+  /**
+   * Emite el detalle de cuenta (se entrega antes de pagar): le da su ID y lo deja en el turno actual.
+   * La mesa sigue ocupada, "por cobrar", hasta registrar el pago.
+   */
+  emit(accountId: string) {
     const a = this.state.accounts.find((x) => x.id === accountId);
     if (!a || a.status !== 'abierta') throw new DomainError('La cuenta ya no está abierta');
+    if (!a.lines.length) throw new DomainError('La cuenta no tiene productos');
     if (a.lines.some((l) => !l.sentAt)) throw new DomainError('Hay productos sin enviar. Envíalos o quítalos antes de emitir');
-    if (!(opts.tip >= 0)) throw new DomainError('Propina inválida');
-    if (!opts.paymentMethod) throw new DomainError('Elige el medio de pago');
     const { day, turno } = this.currentTurno();
     this.commit((d) => {
       const acc = d.accounts.find((x) => x.id === accountId)!;
       acc.status = 'emitida';
-      acc.folio = d.nextFolio++;
+      // Si se reabrió para agregar algo, conserva su ID.
+      acc.folio ??= d.nextFolio++;
       acc.emittedAt = this.iso();
       acc.day = day;
       acc.turno = turno;
-      acc.tip = Math.round(opts.tip);
-      acc.paymentMethod = opts.paymentMethod;
-      acc.boleta = opts.boleta?.trim() || undefined;
       // Lo que quedaba listo en cocina o barra se da por entregado.
       d.comandas
         .filter((c) => c.accountId === acc.id && c.status === 'listo')
@@ -288,6 +291,32 @@ export class Store {
           c.status = 'entregado';
           c.updatedAt = this.iso();
         });
+    });
+  }
+
+  /** Registra el pago de un detalle emitido y libera la mesa. */
+  pay(accountId: string, opts: { tip: number; paymentMethod: string; boleta?: string }) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'emitida') throw new DomainError('Primero emite el detalle de cuenta');
+    if (a.paidAt) throw new DomainError('Este detalle ya está pagado');
+    if (!(opts.tip >= 0)) throw new DomainError('Propina inválida');
+    if (!opts.paymentMethod) throw new DomainError('Elige el medio de pago');
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      acc.paidAt = this.iso();
+      acc.tip = Math.round(opts.tip);
+      acc.paymentMethod = opts.paymentMethod;
+      acc.boleta = opts.boleta?.trim() || undefined;
+    });
+  }
+
+  /** Vuelve a abrir un detalle emitido sin cobrar, para agregar o corregir productos. Conserva su ID. */
+  reopen(accountId: string) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'emitida' || a.paidAt) throw new DomainError('Solo se puede reabrir un detalle por cobrar');
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      acc.status = 'abierta';
     });
   }
 

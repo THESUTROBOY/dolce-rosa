@@ -64,6 +64,8 @@ export interface Account {
   lines: Line[];
   openedAt: string;
   emittedAt?: string;
+  /** Cuándo se registró el pago. Sin esto, el detalle emitido está "por cobrar" y la mesa sigue ocupada. */
+  paidAt?: string;
   /** Fecha local YYYY-MM-DD y turno en que se emitió el detalle. */
   day?: string;
   turno?: Turno;

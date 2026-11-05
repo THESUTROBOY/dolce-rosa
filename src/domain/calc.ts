@@ -16,6 +16,12 @@ export function netAndTax(total: number) {
 
 export const suggestedTip = (total: number, percent: number) => Math.round((total * percent) / 100 / 10) * 10;
 
+/** La cuenta ocupa la mesa mientras está abierta o emitida sin cobrar. */
+export function occupiesTable(a: Account): boolean {
+  return a.status === 'abierta' || (a.status === 'emitida' && !a.paidAt);
+}
+export const isPending = (a: Account) => a.status === 'emitida' && !a.paidAt;
+
 /** ID del detalle de cuenta con seis dígitos, ej. 000124. */
 export function folioLabel(folio?: number): string {
   return folio ? String(folio).padStart(6, '0') : '—';
@@ -48,6 +54,7 @@ export interface Summary {
   byDay: { day: string; total: number; count: number }[];
   voided: number;
   unchecked: number;
+  pending: number;
 }
 
 /** Resume las cuentas emitidas en un rango de días [from, to] (YYYY-MM-DD) y, opcional, un turno. */
@@ -62,7 +69,7 @@ export function summarize(state: AppState, from: string, to: string, turno?: Tur
   const prods = new Map<string, { name: string; qty: number; total: number }>();
   const days = new Map<string, { total: number; count: number }>();
   for (const a of emitted) {
-    const m = a.paymentMethod ?? 'Sin indicar';
+    const m = a.paidAt ? (a.paymentMethod ?? 'Sin indicar') : 'Por cobrar';
     const mm = methods.get(m) ?? { amount: 0, count: 0 };
     mm.amount += accountDue(a);
     mm.count++;
@@ -99,6 +106,7 @@ export function summarize(state: AppState, from: string, to: string, turno?: Tur
     products: [...prods.values()].sort((a, b) => b.qty - a.qty || b.total - a.total),
     byDay: [...days].map(([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day)),
     voided,
-    unchecked: emitted.filter((a) => !a.checked).length,
+    unchecked: emitted.filter((a) => a.paidAt && !a.checked).length,
+    pending: emitted.filter((a) => !a.paidAt).length,
   };
 }

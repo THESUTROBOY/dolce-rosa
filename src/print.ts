@@ -1,4 +1,4 @@
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax } from './domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
 import type { Account, Comanda, Settings } from './domain/types';
 import { STATION_LABEL } from './domain/types';
 
@@ -26,8 +26,14 @@ export function accountHtml(a: Account, s: Settings) {
   ${lines}<hr>
   <div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>
   <div class="r s"><span>Neto ${clp(neto)}</span><span>IVA ${clp(iva)}</span></div>
-  ${a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div><div class="r b"><span>A PAGAR</span><span>${clp(accountDue(a))}</span></div>` : ''}
-  ${a.status !== 'abierta' && a.paymentMethod ? `<div class="r"><span>Pago</span><span>${esc(a.paymentMethod)}</span></div>` : ''}
+  ${
+    a.paidAt
+      ? (a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div><div class="r b"><span>PAGADO</span><span>${clp(accountDue(a))}</span></div>` : '') +
+        (a.paymentMethod ? `<div class="r"><span>Pago</span><span>${esc(a.paymentMethod)}</span></div>` : '')
+      : s.tipPercent > 0
+        ? `<hr><div class="r"><span>Propina sugerida ${s.tipPercent}%</span><span>${clp(suggestedTip(total, s.tipPercent))}</span></div><div class="r b"><span>TOTAL CON PROPINA</span><span>${clp(total + suggestedTip(total, s.tipPercent))}</span></div>`
+        : ''
+  }
   <hr><div class="c s">${esc(s.footer)}</div>`;
 }
 

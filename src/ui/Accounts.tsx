@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, summarize } from '../domain/calc';
+import { accountDue, accountTotal, clp, folioLabel, isPending, lineTotal, summarize } from '../domain/calc';
 import type { Account, Turno } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
 import { canPrint, useAction, useAppState, useStore, useUi } from '../state';
 import { downloadFile, Empty, Segmented, Sheet, toCsv } from './kit';
-import { ReasonSheet } from './TableView';
+import { PaySheet, ReasonSheet } from './TableView';
 
 type TurnoSel = Turno | 'todo';
 
@@ -27,7 +27,7 @@ export function Accounts() {
   const sum = summarize(state, d, d, t === 'todo' ? undefined : t);
   const list = state.accounts
     .filter((a) => a.status !== 'abierta' && a.day === d && (t === 'todo' || a.turno === t))
-    .filter((a) => !onlyPending || (a.status === 'emitida' && !a.checked))
+    .filter((a) => !onlyPending || (a.status === 'emitida' && (!a.paidAt || !a.checked)))
     .filter((a) => !qd || folioLabel(a.folio).includes(qd) || String(a.folio ?? '') === qd || (a.boleta ?? '').includes(qd))
     .sort((a, b) => (b.emittedAt ?? b.voidedAt ?? '').localeCompare(a.emittedAt ?? a.voidedAt ?? ''));
   const rawDate = new Date(d + 'T12:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -38,7 +38,7 @@ export function Accounts() {
     state.accounts
       .filter((a) => a.status !== 'abierta' && a.day === d && (t === 'todo' || a.turno === t))
       .forEach((a) =>
-        rows.push([folioLabel(a.folio), a.day!, a.turno!, a.tableName, a.status, accountTotal(a), a.tip, accountDue(a), a.paymentMethod ?? '', a.boleta ?? '', a.checked ? 'sí' : 'no']),
+        rows.push([folioLabel(a.folio), a.day!, a.turno!, a.tableName, a.status, accountTotal(a), a.tip, accountDue(a), a.paidAt ? (a.paymentMethod ?? '') : 'por cobrar', a.boleta ?? '', a.checked ? 'sí' : 'no']),
       );
     downloadFile(`cuentas_${d}_${t}.csv`, toCsv(rows));
   };
@@ -88,6 +88,7 @@ export function Accounts() {
           ))}
         </ul>
         <p className={`sum-check ${sum.unchecked ? 'warn' : 'ok'}`}>
+          {sum.pending ? `${sum.pending} por cobrar · ` : ''}
           {sum.unchecked ? `${sum.unchecked} por cuadrar con su boleta` : sum.count ? 'Todas cuadradas con su boleta' : 'Aún no hay cuentas en este turno'}
         </p>
       </div>
@@ -129,15 +130,16 @@ export function Accounts() {
                   <span className="row-title">
                     {a.tableName}
                     {a.status === 'anulada' && <span className="pill pill-danger">Anulada</span>}
+                    {isPending(a) && <span className="pill pill-warn tag-gap">Por cobrar</span>}
                   </span>
                   <span className="row-sub">
-                    {new Date(a.emittedAt ?? a.voidedAt!).toLocaleTimeString('es-CL', { timeStyle: 'short' })} · {a.paymentMethod ?? '—'}
+                    {new Date(a.emittedAt ?? a.voidedAt!).toLocaleTimeString('es-CL', { timeStyle: 'short' })} · {a.paidAt ? a.paymentMethod : 'sin pago aún'}
                     {a.boleta ? ` · Boleta ${a.boleta}` : ''}
                   </span>
                 </span>
                 <span className="row-price">{clp(accountDue(a))}</span>
               </button>
-              {a.status === 'emitida' && (
+              {a.status === 'emitida' && a.paidAt && (
                 <button
                   className={`check ${a.checked ? 'on' : ''}`}
                   aria-pressed={!!a.checked}
@@ -165,6 +167,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
   const a = state.accounts.find((x) => x.id === id)!;
   const [boleta, setBoleta] = useState(a.boleta ?? '');
   const [voiding, setVoiding] = useState(false);
+  const [paying, setPaying] = useState(false);
   const cur = store.currentTurno();
   const editable = a.status === 'emitida' && (isAdmin || (a.day === cur.day && a.turno === cur.turno));
 
@@ -190,10 +193,12 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
             <span>Consumo</span>
             <span>{clp(accountTotal(a))}</span>
           </div>
-          <div className="rc-line">
-            <span>Propina</span>
-            <span>{clp(a.tip)}</span>
-          </div>
+          {a.paidAt && (
+            <div className="rc-line">
+              <span>Propina</span>
+              <span>{clp(a.tip)}</span>
+            </div>
+          )}
           <div className="rc-line rc-total">
             <span>Total</span>
             <span>{clp(accountDue(a))}</span>
@@ -206,7 +211,17 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
         </footer>
       </article>
 
-      {editable && (
+      {isPending(a) && (
+        <div className="actions">
+          <p className="pending-note">
+            <span className="pill pill-warn">Por cobrar</span> {a.tableName} sigue ocupada hasta registrar el pago.
+          </p>
+          <button className="btn-primary wide" onClick={() => setPaying(true)}>
+            Registrar pago
+          </button>
+        </div>
+      )}
+      {editable && !isPending(a) && (
         <>
           <fieldset className="choice">
             <legend>Medio de pago</legend>
@@ -245,6 +260,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
           </button>
         )}
       </div>
+      {paying && <PaySheet account={a} onClose={() => setPaying(false)} onDone={() => setPaying(false)} />}
       {voiding && (
         <ReasonSheet
           title={a.folio ? `Anular detalle ${folioLabel(a.folio)}` : `Anular cuenta de ${a.tableName}`}
