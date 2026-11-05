@@ -1,22 +1,23 @@
-export type Role = 'admin' | 'cajero';
+/** Estación donde se prepara un producto. */
+export type Station = 'barra' | 'cocina';
 
-export interface User {
-  id: string;
-  name: string;
-  role: Role;
-  pin: string;
-  active: boolean;
-}
+export const STATION_LABEL: Record<Station, string> = {
+  barra: 'Cafetería y preparados',
+  cocina: 'Cocina',
+};
+
+export type Turno = 'mañana' | 'tarde';
 
 export interface Category {
   id: string;
   name: string;
   sort: number;
+  station: Station;
 }
 
 export interface Option {
   name: string;
-  /** Precio en CLP con IVA. Para variantes es el precio final; para extras, lo que se suma. */
+  /** CLP con IVA. Variante: precio final. Extra: lo que se suma. */
   price: number;
 }
 
@@ -24,7 +25,8 @@ export interface Product {
   id: string;
   categoryId: string;
   name: string;
-  /** Precio base con IVA incluido (CLP). Se ignora si hay variantes. */
+  description: string;
+  /** Precio con IVA. Se ignora si hay variantes. */
   price: number;
   variants: Option[];
   extras: Option[];
@@ -32,17 +34,7 @@ export interface Product {
   archived: boolean;
 }
 
-export interface PriceChange {
-  id: string;
-  productId: string;
-  productName: string;
-  before: string;
-  after: string;
-  by: string;
-  at: string;
-}
-
-export interface OrderItem {
+export interface Line {
   id: string;
   productId: string;
   name: string;
@@ -51,71 +43,57 @@ export interface OrderItem {
   unitPrice: number;
   qty: number;
   note: string;
-  /** Unidades ya enviadas a comanda. */
-  sentQty: number;
+  station: Station;
+  addedAt: string;
+  /** Se completa al enviar a la comanda. */
+  sentAt?: string;
+  comandaId?: string;
 }
 
-export type OrderType = 'mesa' | 'llevar';
-export type OrderStatus = 'abierto' | 'pagado' | 'anulado';
-export type KitchenStatus = 'pendiente' | 'listo' | 'entregado';
+export type AccountStatus = 'abierta' | 'emitida' | 'anulada';
 
-export interface Discount {
-  kind: 'monto' | 'porcentaje';
-  value: number;
-}
-
-export interface Payment {
-  method: string;
-  /** Monto aplicado al pedido (incluye propina y redondeo). */
-  amount: number;
-  /** Solo efectivo: lo que entregó el cliente. */
-  received?: number;
-}
-
-export interface Order {
+/** La cuenta de una mesa: se abre con el primer producto y se cierra al emitir el detalle. */
+export interface Account {
   id: string;
   number: number;
-  type: OrderType;
-  tableId?: string;
-  customerName: string;
-  status: OrderStatus;
-  kitchenStatus: KitchenStatus;
-  items: OrderItem[];
-  discount?: Discount;
+  tableId: string;
+  tableName: string;
+  status: AccountStatus;
+  lines: Line[];
+  openedAt: string;
+  emittedAt?: string;
+  /** Fecha local YYYY-MM-DD y turno en que se emitió el detalle. */
+  day?: string;
+  turno?: Turno;
   tip: number;
-  /** Ajuste por redondeo del efectivo (puede ser negativo). */
-  rounding: number;
-  payments: Payment[];
-  createdBy: string;
-  createdAt: string;
-  paidAt?: string;
-  paidBy?: string;
-  shiftId?: string;
+  paymentMethod?: string;
+  /** Número de boleta con que se cuadró (opcional). */
+  boleta?: string;
+  checked?: boolean;
   voidReason?: string;
-  voidedBy?: string;
   voidedAt?: string;
 }
 
-export interface CashMovement {
-  id: string;
-  kind: 'ingreso' | 'retiro';
-  amount: number;
-  reason: string;
-  by: string;
-  at: string;
+export type ComandaStatus = 'pendiente' | 'preparando' | 'listo' | 'entregado';
+
+export interface ComandaItem {
+  name: string;
+  variant?: string;
+  extras: string[];
+  qty: number;
+  note: string;
 }
 
-export interface Shift {
+export interface Comanda {
   id: string;
-  openedBy: string;
-  openedAt: string;
-  openingCash: number;
-  movements: CashMovement[];
-  closedBy?: string;
-  closedAt?: string;
-  countedCash?: number;
-  expectedCash?: number;
-  note?: string;
+  number: number;
+  accountId: string;
+  tableName: string;
+  station: Station;
+  items: ComandaItem[];
+  createdAt: string;
+  status: ComandaStatus;
+  updatedAt: string;
 }
 
 export interface TableDef {
@@ -127,31 +105,30 @@ export interface Settings {
   businessName: string;
   address: string;
   phone: string;
-  receiptFooter: string;
+  footer: string;
   tipPercent: number;
   paymentMethods: string[];
+  /** Hora (0-23) en que empieza el turno de la tarde. */
+  afternoonStartsAt: number;
+  adminPin: string;
 }
 
 export interface AuditEntry {
   id: string;
   action: string;
   detail: string;
-  by: string;
   at: string;
 }
 
 export interface AppState {
-  version: 1;
-  users: User[];
+  version: 2;
   categories: Category[];
   products: Product[];
-  priceChanges: PriceChange[];
   tables: TableDef[];
-  orders: Order[];
-  shifts: Shift[];
+  accounts: Account[];
+  comandas: Comanda[];
   settings: Settings;
   audit: AuditEntry[];
-  nextOrderNumber: number;
+  nextAccount: number;
+  nextComanda: number;
 }
-
-export const CASH = 'Efectivo';

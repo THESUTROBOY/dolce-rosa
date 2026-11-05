@@ -1,34 +1,40 @@
-import { amountDue, expectedCash, paidSoFar } from './calc';
+import { dayKey, turnoOf } from './calc';
 import { seedState } from './seed';
-import type {
-  AppState,
-  Category,
-  Order,
-  OrderType,
-  Payment,
-  Product,
-  Settings,
-  Shift,
-  TableDef,
-  User,
-} from './types';
+import type { Account, AppState, Category, Comanda, ComandaStatus, Line, Product, Settings, Station, TableDef } from './types';
 
 export interface Persistence {
   load(): AppState | null;
   save(state: AppState): void;
+  /** Avisa cuando otra pestaña del mismo equipo cambió los datos. */
+  watch?(fn: (s: AppState) => void): void;
 }
 
-export const localPersistence = (key = 'dolce-rosa:v1'): Persistence => ({
+export const localPersistence = (key: string): Persistence => ({
   load() {
     try {
       const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as AppState) : null;
+      const s = raw ? (JSON.parse(raw) as AppState) : null;
+      return s?.version === 2 ? s : null;
     } catch {
       return null;
     }
   },
   save(state) {
-    localStorage.setItem(key, JSON.stringify(state));
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      /* sin almacenamiento: la app sigue funcionando en memoria */
+    }
+  },
+  watch(fn) {
+    window.addEventListener('storage', (e) => {
+      if (e.key !== key || !e.newValue) return;
+      try {
+        fn(JSON.parse(e.newValue) as AppState);
+      } catch {
+        /* ignora datos corruptos */
+      }
+    });
   },
 });
 
@@ -39,20 +45,31 @@ export const memoryPersistence = (): Persistence => {
 
 export class DomainError extends Error {}
 
-export const uid = (p: string) =>
-  `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+export const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-const now = () => new Date().toISOString();
+export interface NewLine {
+  productId: string;
+  variant?: string;
+  extras: string[];
+  qty: number;
+  note: string;
+}
 
 export class Store {
   private state: AppState;
   private listeners = new Set<() => void>();
   private persistence: Persistence;
+  /** Reloj inyectable para pruebas. */
+  now: () => Date = () => new Date();
 
   constructor(persistence: Persistence, initial: () => AppState = seedState) {
     this.persistence = persistence;
     this.state = persistence.load() ?? initial();
     persistence.save(this.state);
+    persistence.watch?.((s) => {
+      this.state = s;
+      this.listeners.forEach((l) => l());
+    });
   }
 
   get = () => this.state;
@@ -62,200 +79,292 @@ export class Store {
     return () => this.listeners.delete(fn);
   };
 
-  private commit(mut: (draft: AppState) => void) {
-    const draft = structuredClone(this.state);
-    mut(draft);
-    this.state = draft;
-    this.persistence.save(draft);
+  private iso = () => this.now().toISOString();
+
+  private commit(mut: (d: AppState) => void) {
+    const d = structuredClone(this.state);
+    mut(d);
+    this.state = d;
+    this.persistence.save(d);
     this.listeners.forEach((l) => l());
   }
 
-  private user(id: string): User {
-    const u = this.state.users.find((x) => x.id === id && x.active);
-    if (!u) throw new DomainError('Usuario no válido');
-    return u;
+  private log(d: AppState, action: string, detail: string) {
+    d.audit.push({ id: uid('log'), action, detail, at: this.iso() });
+    if (d.audit.length > 2000) d.audit.splice(0, d.audit.length - 2000);
   }
 
-  private requireAdmin(userId: string) {
-    if (this.user(userId).role !== 'admin') throw new DomainError('Solo un administrador puede hacer esto');
+  // ---------- Consultas ----------
+  openAccountFor(tableId: string): Account | undefined {
+    return this.state.accounts.find((a) => a.tableId === tableId && a.status === 'abierta');
   }
 
-  private log(d: AppState, by: string, action: string, detail: string) {
-    d.audit.push({ id: uid('log'), action, detail, by, at: now() });
+  stationOf(productId: string): Station {
+    const p = this.state.products.find((x) => x.id === productId);
+    return this.state.categories.find((c) => c.id === p?.categoryId)?.station ?? 'barra';
   }
 
-  // ---------- Sesión ----------
-  login(pin: string): User {
-    const u = this.state.users.find((x) => x.pin === pin && x.active);
-    if (!u) throw new DomainError('PIN incorrecto');
-    return u;
+  currentTurno(): { day: string; turno: ReturnType<typeof turnoOf> } {
+    const n = this.now();
+    return { day: dayKey(n), turno: turnoOf(n, this.state.settings.afternoonStartsAt) };
   }
 
-  // ---------- Caja ----------
-  openShift(): Shift | undefined {
-    return this.state.shifts.find((s) => !s.closedAt);
+  checkPin(pin: string) {
+    return pin === this.state.settings.adminPin;
   }
 
-  startShift(userId: string, openingCash: number) {
-    this.user(userId);
-    if (this.openShift()) throw new DomainError('Ya hay una caja abierta');
-    if (!(openingCash >= 0)) throw new DomainError('Monto inicial inválido');
-    this.commit((d) => {
-      d.shifts.push({ id: uid('turno'), openedBy: userId, openedAt: now(), openingCash, movements: [] });
-      this.log(d, userId, 'Abrir caja', `Monto inicial ${openingCash}`);
-    });
-  }
-
-  addMovement(userId: string, kind: 'ingreso' | 'retiro', amount: number, reason: string) {
-    this.user(userId);
-    const s = this.openShift();
-    if (!s) throw new DomainError('No hay caja abierta');
-    if (!(amount > 0)) throw new DomainError('Monto inválido');
-    if (!reason.trim()) throw new DomainError('Indica un motivo');
-    this.commit((d) => {
-      d.shifts.find((x) => x.id === s.id)!.movements.push({ id: uid('mov'), kind, amount, reason, by: userId, at: now() });
-      this.log(d, userId, kind === 'ingreso' ? 'Ingreso de caja' : 'Retiro de caja', `${amount}: ${reason}`);
-    });
-  }
-
-  closeShift(userId: string, countedCash: number, note = '') {
-    this.user(userId);
-    const s = this.openShift();
-    if (!s) throw new DomainError('No hay caja abierta');
-    if (!(countedCash >= 0)) throw new DomainError('Monto contado inválido');
-    const expected = expectedCash(this.state, s);
-    this.commit((d) => {
-      const x = d.shifts.find((y) => y.id === s.id)!;
-      x.closedAt = now();
-      x.closedBy = userId;
-      x.countedCash = countedCash;
-      x.expectedCash = expected;
-      x.note = note;
-      this.log(d, userId, 'Cerrar caja', `Esperado ${expected}, contado ${countedCash}`);
-    });
-  }
-
-  // ---------- Pedidos ----------
-  newOrder(userId: string, type: OrderType, tableId?: string): Order {
-    this.user(userId);
-    return {
-      id: uid('ped'),
-      number: 0,
-      type,
-      tableId,
-      customerName: '',
-      status: 'abierto',
-      kitchenStatus: 'pendiente',
-      items: [],
-      tip: 0,
-      rounding: 0,
-      payments: [],
-      createdBy: userId,
-      createdAt: now(),
+  // ---------- Mesas y cuentas ----------
+  addLine(tableId: string, l: NewLine): Account {
+    const table = this.state.tables.find((t) => t.id === tableId);
+    if (!table) throw new DomainError('Mesa no encontrada');
+    const p = this.state.products.find((x) => x.id === l.productId);
+    if (!p || p.archived) throw new DomainError('Producto no disponible');
+    if (p.soldOut) throw new DomainError(`${p.name} está agotado`);
+    if (!(l.qty >= 1)) throw new DomainError('Cantidad inválida');
+    const variant = l.variant ? p.variants.find((v) => v.name === l.variant) : undefined;
+    if (p.variants.length && !variant) throw new DomainError('Elige un tamaño');
+    const extrasPrice = l.extras.reduce((s, e) => {
+      const x = p.extras.find((y) => y.name === e);
+      if (!x) throw new DomainError(`Extra no válido: ${e}`);
+      return s + x.price;
+    }, 0);
+    const line: Line = {
+      id: uid('lin'),
+      productId: p.id,
+      name: p.name,
+      variant: variant?.name,
+      extras: l.extras,
+      unitPrice: (variant?.price ?? p.price) + extrasPrice,
+      qty: l.qty,
+      note: l.note.trim(),
+      station: this.stationOf(p.id),
+      addedAt: this.iso(),
     };
-  }
-
-  /** Guarda (crea o actualiza) un pedido abierto. Devuelve el pedido con número asignado. */
-  saveOrder(userId: string, order: Order): Order {
-    this.user(userId);
-    const existing = this.state.orders.find((o) => o.id === order.id);
-    if (existing && existing.status !== 'abierto') throw new DomainError('El pedido ya está cerrado');
-    if (order.type === 'mesa' && !order.tableId) throw new DomainError('Elige una mesa');
-    if (order.type === 'mesa') {
-      const busy = this.state.orders.find(
-        (o) => o.status === 'abierto' && o.tableId === order.tableId && o.id !== order.id,
-      );
-      if (busy) throw new DomainError(`La mesa ya tiene el pedido #${busy.number} abierto`);
-    }
-    let saved = order;
+    let accountId = this.openAccountFor(tableId)?.id;
     this.commit((d) => {
-      if (existing) {
-        const i = d.orders.findIndex((o) => o.id === order.id);
-        d.orders[i] = { ...order, number: existing.number };
-        saved = d.orders[i];
-      } else {
-        saved = { ...order, number: d.nextOrderNumber++ };
-        d.orders.push(saved);
+      let acc = d.accounts.find((a) => a.id === accountId);
+      if (!acc) {
+        acc = {
+          id: uid('cta'),
+          number: d.nextAccount++,
+          tableId,
+          tableName: table.name,
+          status: 'abierta',
+          lines: [],
+          openedAt: this.iso(),
+          tip: 0,
+        };
+        d.accounts.push(acc);
+        accountId = acc.id;
       }
+      acc.lines.push(line);
     });
-    return saved;
+    return this.state.accounts.find((a) => a.id === accountId)!;
   }
 
-  markSent(orderId: string) {
+  /** Cambia cantidad o nota de un producto que todavía no se envía. */
+  updateUnsent(accountId: string, lineId: string, patch: { qty?: number; note?: string }) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    const l = a?.lines.find((x) => x.id === lineId);
+    if (!a || !l || a.status !== 'abierta') throw new DomainError('La cuenta ya no está abierta');
+    if (l.sentAt) throw new DomainError('Ese producto ya se envió; para quitarlo pide a administración');
     this.commit((d) => {
-      const o = d.orders.find((x) => x.id === orderId);
-      if (!o) return;
-      o.items.forEach((i) => (i.sentQty = i.qty));
-      o.kitchenStatus = 'pendiente';
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      const line = acc.lines.find((x) => x.id === lineId)!;
+      if (patch.note !== undefined) line.note = patch.note.trim();
+      if (patch.qty !== undefined) {
+        if (patch.qty <= 0) acc.lines = acc.lines.filter((x) => x.id !== lineId);
+        else line.qty = patch.qty;
+      }
+      this.dropIfEmpty(d, acc);
     });
   }
 
-  setKitchenStatus(orderId: string, status: Order['kitchenStatus']) {
-    this.commit((d) => {
-      const o = d.orders.find((x) => x.id === orderId);
-      if (o) o.kitchenStatus = status;
-    });
-  }
-
-  /** Elimina un pedido abierto sin cobrar (por ejemplo, creado por error). Queda en el registro. */
-  discardOpenOrder(userId: string, orderId: string, reason: string) {
-    this.voidOrder(userId, orderId, reason);
-  }
-
-  pay(userId: string, orderId: string, payments: Payment[], tip: number, rounding: number) {
-    this.user(userId);
-    const shift = this.openShift();
-    if (!shift) throw new DomainError('Abre la caja antes de cobrar');
-    const o = this.state.orders.find((x) => x.id === orderId);
-    if (!o || o.status !== 'abierto') throw new DomainError('Pedido no disponible');
-    if (o.items.length === 0) throw new DomainError('El pedido está vacío');
-    if (tip < 0) throw new DomainError('Propina inválida');
-    const due = amountDue({ ...o, tip, rounding });
-    const paid = paidSoFar({ payments });
-    if (paid !== due) throw new DomainError(`Los pagos (${paid}) no cuadran con el total (${due})`);
-    this.commit((d) => {
-      const x = d.orders.find((y) => y.id === orderId)!;
-      x.payments = payments;
-      x.tip = tip;
-      x.rounding = rounding;
-      x.status = 'pagado';
-      x.paidAt = now();
-      x.paidBy = userId;
-      x.shiftId = shift.id;
-    });
-  }
-
-  voidOrder(userId: string, orderId: string, reason: string) {
-    const o = this.state.orders.find((x) => x.id === orderId);
-    if (!o) throw new DomainError('Pedido no encontrado');
-    if (o.status === 'anulado') throw new DomainError('El pedido ya está anulado');
-    if (o.status === 'pagado') {
-      this.requireAdmin(userId);
-      const shift = this.state.shifts.find((s) => s.id === o.shiftId);
-      if (shift?.closedAt) throw new DomainError('La caja de esa venta ya se cerró; no se puede anular');
-    } else {
-      this.user(userId);
-    }
+  /** Quita un producto ya enviado. Solo administración. */
+  removeSent(isAdmin: boolean, accountId: string, lineId: string, reason: string) {
+    if (!isAdmin) throw new DomainError('Solo administración puede quitar productos ya enviados');
     if (!reason.trim()) throw new DomainError('Indica el motivo');
     this.commit((d) => {
-      const x = d.orders.find((y) => y.id === orderId)!;
-      x.status = 'anulado';
-      x.voidReason = reason;
-      x.voidedBy = userId;
-      x.voidedAt = now();
-      this.log(d, userId, 'Anular pedido', `#${x.number}: ${reason}`);
+      const acc = d.accounts.find((x) => x.id === accountId);
+      const line = acc?.lines.find((x) => x.id === lineId);
+      if (!acc || !line || acc.status !== 'abierta') return;
+      acc.lines = acc.lines.filter((x) => x.id !== lineId);
+      this.log(d, 'Quitar producto enviado', `${acc.tableName} cuenta ${acc.number}: ${line.qty}× ${line.name} (${reason})`);
+      this.dropIfEmpty(d, acc);
     });
   }
 
-  logReprint(userId: string, orderId: string, what: string) {
-    const o = this.state.orders.find((x) => x.id === orderId);
-    this.commit((d) => this.log(d, userId, 'Reimpresión', `${what} #${o?.number ?? '?'}`));
+  private dropIfEmpty(d: AppState, acc: Account) {
+    if (acc.lines.length === 0 && acc.status === 'abierta') d.accounts = d.accounts.filter((x) => x.id !== acc.id);
   }
 
-  // ---------- Carta ----------
-  saveCategory(userId: string, c: Category) {
-    this.requireAdmin(userId);
-    if (!c.name.trim()) throw new DomainError('Nombre requerido');
+  /** Envía lo pendiente: arma una comanda por estación. Devuelve cuántos productos fueron a cada una. */
+  send(accountId: string): Record<Station, number> {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'abierta') throw new DomainError('La cuenta ya no está abierta');
+    const pending = a.lines.filter((l) => !l.sentAt);
+    if (!pending.length) throw new DomainError('No hay productos nuevos para enviar');
+    const counts: Record<Station, number> = { barra: 0, cocina: 0 };
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      for (const station of ['cocina', 'barra'] as Station[]) {
+        const lines = acc.lines.filter((l) => !l.sentAt && l.station === station);
+        if (!lines.length) continue;
+        const c: Comanda = {
+          id: uid('com'),
+          number: d.nextComanda++,
+          accountId: acc.id,
+          tableName: acc.tableName,
+          station,
+          items: lines.map((l) => ({ name: l.name, variant: l.variant, extras: l.extras, qty: l.qty, note: l.note })),
+          createdAt: this.iso(),
+          status: 'pendiente',
+          updatedAt: this.iso(),
+        };
+        d.comandas.push(c);
+        lines.forEach((l) => {
+          l.sentAt = this.iso();
+          l.comandaId = c.id;
+          counts[station] += l.qty;
+        });
+      }
+    });
+    return counts;
+  }
+
+  setComandaStatus(id: string, status: ComandaStatus) {
+    this.commit((d) => {
+      const c = d.comandas.find((x) => x.id === id);
+      if (c) {
+        c.status = status;
+        c.updatedAt = this.iso();
+      }
+    });
+  }
+
+  moveTable(accountId: string, tableId: string) {
+    const table = this.state.tables.find((t) => t.id === tableId);
+    if (!table) throw new DomainError('Mesa no encontrada');
+    if (this.openAccountFor(tableId)) throw new DomainError(`${table.name} ya tiene una cuenta abierta`);
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId);
+      if (!acc || acc.status !== 'abierta') return;
+      const from = acc.tableName;
+      acc.tableId = table.id;
+      acc.tableName = table.name;
+      d.comandas.filter((c) => c.accountId === acc.id).forEach((c) => (c.tableName = table.name));
+      this.log(d, 'Cambiar mesa', `Cuenta ${acc.number}: ${from} → ${table.name}`);
+    });
+  }
+
+  /** Emite el detalle de cuenta: cierra la mesa y la deja en el turno actual. */
+  emit(accountId: string, opts: { tip: number; paymentMethod: string; boleta?: string }) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'abierta') throw new DomainError('La cuenta ya no está abierta');
+    if (a.lines.some((l) => !l.sentAt)) throw new DomainError('Hay productos sin enviar. Envíalos o quítalos antes de emitir');
+    if (!(opts.tip >= 0)) throw new DomainError('Propina inválida');
+    if (!opts.paymentMethod) throw new DomainError('Elige el medio de pago');
+    const { day, turno } = this.currentTurno();
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      acc.status = 'emitida';
+      acc.emittedAt = this.iso();
+      acc.day = day;
+      acc.turno = turno;
+      acc.tip = Math.round(opts.tip);
+      acc.paymentMethod = opts.paymentMethod;
+      acc.boleta = opts.boleta?.trim() || undefined;
+      // Lo que quedaba listo en cocina o barra se da por entregado.
+      d.comandas
+        .filter((c) => c.accountId === acc.id && c.status === 'listo')
+        .forEach((c) => {
+          c.status = 'entregado';
+          c.updatedAt = this.iso();
+        });
+    });
+  }
+
+  /** Datos para cuadrar con la boleta. Los trabajadores solo pueden tocar su turno de hoy. */
+  updateEmitted(isAdmin: boolean, accountId: string, patch: Partial<Pick<Account, 'boleta' | 'checked' | 'paymentMethod'>>) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'emitida') throw new DomainError('Cuenta no encontrada');
+    const cur = this.currentTurno();
+    if (!isAdmin && (a.day !== cur.day || a.turno !== cur.turno)) throw new DomainError('Solo puedes editar cuentas de tu turno');
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      if (patch.boleta !== undefined) acc.boleta = patch.boleta.trim() || undefined;
+      if (patch.checked !== undefined) acc.checked = patch.checked;
+      if (patch.paymentMethod) acc.paymentMethod = patch.paymentMethod;
+    });
+  }
+
+  voidAccount(isAdmin: boolean, accountId: string, reason: string) {
+    if (!isAdmin) throw new DomainError('Solo administración puede anular');
+    if (!reason.trim()) throw new DomainError('Indica el motivo');
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId);
+      if (!acc || acc.status === 'anulada') return;
+      if (acc.status === 'abierta') {
+        const { day, turno } = this.currentTurno();
+        acc.day = day;
+        acc.turno = turno;
+      }
+      acc.status = 'anulada';
+      acc.voidReason = reason.trim();
+      acc.voidedAt = this.iso();
+      d.comandas
+        .filter((c) => c.accountId === acc.id && c.status !== 'entregado')
+        .forEach((c) => {
+          c.status = 'entregado';
+          c.updatedAt = this.iso();
+        });
+      this.log(d, 'Anular cuenta', `${acc.tableName} cuenta ${acc.number}: ${reason}`);
+    });
+  }
+
+  // ---------- Administración ----------
+  private admin(isAdmin: boolean) {
+    if (!isAdmin) throw new DomainError('Necesitas el modo administrador');
+  }
+
+  saveProduct(isAdmin: boolean, p: Product) {
+    this.admin(isAdmin);
+    if (!p.name.trim()) throw new DomainError('El producto necesita nombre');
+    if (!this.state.categories.some((c) => c.id === p.categoryId)) throw new DomainError('Elige una categoría');
+    if (![p.price, ...p.variants.map((v) => v.price), ...p.extras.map((e) => e.price)].every((x) => Number.isFinite(x) && x >= 0))
+      throw new DomainError('Revisa los precios');
+    this.commit((d) => {
+      const i = d.products.findIndex((x) => x.id === p.id);
+      const prev = i >= 0 ? d.products[i] : undefined;
+      if (prev && prev.price !== p.price) this.log(d, 'Cambio de precio', `${p.name}: ${prev.price} → ${p.price}`);
+      if (i >= 0) d.products[i] = p;
+      else d.products.push(p);
+    });
+  }
+
+  removeProduct(isAdmin: boolean, id: string): 'archivado' | 'eliminado' {
+    this.admin(isAdmin);
+    const used = this.state.accounts.some((a) => a.lines.some((l) => l.productId === id));
+    this.commit((d) => {
+      if (used) {
+        const p = d.products.find((x) => x.id === id);
+        if (p) p.archived = true;
+      } else d.products = d.products.filter((x) => x.id !== id);
+    });
+    return used ? 'archivado' : 'eliminado';
+  }
+
+  setSoldOut(isAdmin: boolean, id: string, soldOut: boolean) {
+    this.admin(isAdmin);
+    this.commit((d) => {
+      const p = d.products.find((x) => x.id === id);
+      if (p) p.soldOut = soldOut;
+    });
+  }
+
+  saveCategory(isAdmin: boolean, c: Category) {
+    this.admin(isAdmin);
+    if (!c.name.trim()) throw new DomainError('La categoría necesita nombre');
     this.commit((d) => {
       const i = d.categories.findIndex((x) => x.id === c.id);
       if (i >= 0) d.categories[i] = c;
@@ -263,114 +372,39 @@ export class Store {
     });
   }
 
-  deleteCategory(userId: string, id: string) {
-    this.requireAdmin(userId);
+  deleteCategory(isAdmin: boolean, id: string) {
+    this.admin(isAdmin);
     if (this.state.products.some((p) => p.categoryId === id && !p.archived))
-      throw new DomainError('La categoría tiene productos; muévelos o archívalos primero');
+      throw new DomainError('La categoría tiene productos. Muévelos o quítalos primero');
     this.commit((d) => {
       d.categories = d.categories.filter((c) => c.id !== id);
     });
   }
 
-  saveProduct(userId: string, p: Product) {
-    this.requireAdmin(userId);
-    if (!p.name.trim()) throw new DomainError('Nombre requerido');
-    if (!(p.price >= 0) || p.variants.some((v) => !(v.price >= 0)) || p.extras.some((v) => !(v.price >= 0)))
-      throw new DomainError('Precio inválido');
-    const prev = this.state.products.find((x) => x.id === p.id);
-    const priceSig = (x: Product) =>
-      x.variants.length ? x.variants.map((v) => `${v.name} ${v.price}`).join(', ') : String(x.price);
+  saveTables(isAdmin: boolean, tables: TableDef[]) {
+    this.admin(isAdmin);
+    const clean = tables.map((t) => ({ ...t, name: t.name.trim() })).filter((t) => t.name);
+    const removed = this.state.tables.filter((t) => !clean.some((x) => x.id === t.id));
+    if (removed.some((t) => this.openAccountFor(t.id))) throw new DomainError('No puedes quitar una mesa con cuenta abierta');
+    if (new Set(clean.map((t) => t.name.toLowerCase())).size !== clean.length) throw new DomainError('Hay mesas con el mismo nombre');
     this.commit((d) => {
-      const i = d.products.findIndex((x) => x.id === p.id);
-      if (i >= 0) d.products[i] = p;
-      else d.products.push(p);
-      if (prev && priceSig(prev) !== priceSig(p)) {
-        d.priceChanges.push({
-          id: uid('precio'),
-          productId: p.id,
-          productName: p.name,
-          before: priceSig(prev),
-          after: priceSig(p),
-          by: userId,
-          at: now(),
-        });
-      }
+      d.tables = clean;
     });
   }
 
-  /** Productos con ventas no se borran: se archivan para no romper los reportes. */
-  deleteProduct(userId: string, id: string) {
-    this.requireAdmin(userId);
-    const used = this.state.orders.some((o) => o.items.some((i) => i.productId === id));
-    this.commit((d) => {
-      if (used) {
-        const p = d.products.find((x) => x.id === id);
-        if (p) p.archived = true;
-      } else {
-        d.products = d.products.filter((x) => x.id !== id);
-      }
-    });
-    return used ? 'archivado' : 'eliminado';
-  }
-
-  setSoldOut(userId: string, id: string, soldOut: boolean) {
-    this.user(userId);
-    this.commit((d) => {
-      const p = d.products.find((x) => x.id === id);
-      if (p) p.soldOut = soldOut;
-    });
-  }
-
-  // ---------- Configuración ----------
-  saveSettings(userId: string, s: Settings) {
-    this.requireAdmin(userId);
+  saveSettings(isAdmin: boolean, s: Settings) {
+    this.admin(isAdmin);
+    if (!/^\d{4,6}$/.test(s.adminPin)) throw new DomainError('El PIN debe tener de 4 a 6 números');
+    if (!(s.afternoonStartsAt >= 1 && s.afternoonStartsAt <= 23)) throw new DomainError('Hora de cambio de turno inválida');
+    if (!s.paymentMethods.length) throw new DomainError('Agrega al menos un medio de pago');
     this.commit((d) => {
       d.settings = s;
     });
   }
 
-  saveTables(userId: string, tables: TableDef[]) {
-    this.requireAdmin(userId);
-    const removed = this.state.tables.filter((t) => !tables.some((x) => x.id === t.id));
-    if (removed.some((t) => this.state.orders.some((o) => o.status === 'abierto' && o.tableId === t.id)))
-      throw new DomainError('No puedes quitar una mesa con pedido abierto');
-    this.commit((d) => {
-      d.tables = tables;
-    });
-  }
-
-  saveUser(userId: string, u: User) {
-    this.requireAdmin(userId);
-    if (!u.name.trim()) throw new DomainError('Nombre requerido');
-    if (!/^\d{4,6}$/.test(u.pin)) throw new DomainError('El PIN debe tener de 4 a 6 dígitos');
-    if (this.state.users.some((x) => x.pin === u.pin && x.id !== u.id)) throw new DomainError('Ese PIN ya está en uso');
-    const admins = this.state.users.filter((x) => x.role === 'admin' && x.active && x.id !== u.id);
-    if (admins.length === 0 && (u.role !== 'admin' || !u.active))
-      throw new DomainError('Debe quedar al menos un administrador activo');
-    this.commit((d) => {
-      const i = d.users.findIndex((x) => x.id === u.id);
-      if (i >= 0) d.users[i] = u;
-      else d.users.push(u);
-      this.log(d, userId, 'Usuario', `${i >= 0 ? 'Editar' : 'Crear'} ${u.name}`);
-    });
-  }
-
-  /** Reemplaza todos los datos (cargar demo o empezar de cero). Solo administración. */
-  replaceAll(userId: string, next: AppState) {
-    this.requireAdmin(userId);
+  replaceAll(isAdmin: boolean, next: AppState) {
+    this.admin(isAdmin);
+    if (next.version !== 2 || !Array.isArray(next.accounts)) throw new DomainError('El archivo no es un respaldo válido');
     this.commit((d) => Object.assign(d, next));
-  }
-
-  // ---------- Respaldo ----------
-  exportBackup(): string {
-    return JSON.stringify(this.state, null, 2);
-  }
-
-  importBackup(userId: string, json: string) {
-    this.requireAdmin(userId);
-    const s = JSON.parse(json) as AppState;
-    if (s.version !== 1 || !Array.isArray(s.orders) || !Array.isArray(s.users))
-      throw new DomainError('El archivo no es un respaldo válido');
-    this.commit((d) => Object.assign(d, s));
   }
 }

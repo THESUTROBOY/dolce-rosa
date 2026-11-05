@@ -1,35 +1,35 @@
-import { createContext, useCallback, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { demoState } from './domain/demo';
 import { DomainError, localPersistence, Store } from './domain/store';
-import type { AppState, User } from './domain/types';
+import type { AppState } from './domain/types';
 
-const store = new Store(localPersistence('dolce-rosa:demo-v2'), () => demoState());
+const store = new Store(localPersistence('dolce-rosa:v3'), () => demoState());
 const StoreCtx = createContext(store);
 
-interface Session {
-  user: User | null;
-  setUser(u: User | null): void;
+interface Ui {
+  isAdmin: boolean;
+  setAdmin(v: boolean): void;
   toast(msg: string, kind?: 'ok' | 'error'): void;
 }
-const SessionCtx = createContext<Session>(null!);
+const UiCtx = createContext<Ui>(null!);
+
+const ADMIN_KEY = 'dolce-rosa:admin';
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [userId, setUserId] = useState<string | null>(() => {
+  const [isAdmin, setIsAdmin] = useState(() => {
     try {
-      return sessionStorage.getItem('dolce-rosa:user');
+      return sessionStorage.getItem(ADMIN_KEY) === '1';
     } catch {
-      return null;
+      return false;
     }
   });
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: 'ok' | 'error' }[]>([]);
-  const state = useSyncExternalStore(store.subscribe, store.get);
-  const user = state.users.find((u) => u.id === userId && u.active) ?? null;
 
-  const setUser = useCallback((u: User | null) => {
-    setUserId(u?.id ?? null);
+  const setAdmin = useCallback((v: boolean) => {
+    setIsAdmin(v);
     try {
-      if (u) sessionStorage.setItem('dolce-rosa:user', u.id);
-      else sessionStorage.removeItem('dolce-rosa:user');
+      if (v) sessionStorage.setItem(ADMIN_KEY, '1');
+      else sessionStorage.removeItem(ADMIN_KEY);
     } catch {
       /* sin almacenamiento de sesión */
     }
@@ -37,13 +37,14 @@ export function Providers({ children }: { children: ReactNode }) {
 
   const toast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 4500 : 2500);
+    setToasts((t) => [...t.slice(-2), { id, msg, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 4200 : 2400);
+    if (kind === 'error') navigator.vibrate?.(30);
   }, []);
 
   return (
     <StoreCtx.Provider value={store}>
-      <SessionCtx.Provider value={{ user, setUser, toast }}>
+      <UiCtx.Provider value={{ isAdmin, setAdmin, toast }}>
         {children}
         <div className="toasts" role="status" aria-live="polite">
           {toasts.map((t) => (
@@ -52,7 +53,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </div>
           ))}
         </div>
-      </SessionCtx.Provider>
+      </UiCtx.Provider>
     </StoreCtx.Provider>
   );
 }
@@ -62,11 +63,11 @@ export const useAppState = (): AppState => {
   const s = useStore();
   return useSyncExternalStore(s.subscribe, s.get);
 };
-export const useSession = () => useContext(SessionCtx);
+export const useUi = () => useContext(UiCtx);
 
-/** Ejecuta una acción del dominio mostrando el error al usuario si falla. */
+/** Corre una acción del dominio y muestra el error en un aviso si falla. */
 export function useAction() {
-  const { toast } = useSession();
+  const { toast } = useUi();
   return useCallback(
     <T,>(fn: () => T, okMsg?: string): T | undefined => {
       try {
@@ -74,7 +75,7 @@ export function useAction() {
         if (okMsg) toast(okMsg);
         return r;
       } catch (e) {
-        toast(e instanceof DomainError ? e.message : 'Ocurrió un error inesperado', 'error');
+        toast(e instanceof DomainError ? e.message : 'Algo falló. Intenta de nuevo.', 'error');
         if (!(e instanceof DomainError)) console.error(e);
         return undefined;
       }
@@ -82,3 +83,33 @@ export function useAction() {
     [toast],
   );
 }
+
+/** Reloj que se actualiza cada `ms` para mostrar tiempos transcurridos. */
+export function useNow(ms = 30000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(t);
+  }, [ms]);
+  return now;
+}
+
+export function minutesSince(iso: string, now: number) {
+  return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
+}
+
+export function ago(iso: string, now: number) {
+  const m = minutesSince(iso, now);
+  if (m < 1) return 'recién';
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+/** La impresión y descargas no funcionan dentro de un visor embebido (la demo). */
+export const canPrint = (() => {
+  try {
+    return window.self === window.top;
+  } catch {
+    return false;
+  }
+})();

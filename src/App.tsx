@@ -1,115 +1,106 @@
-import { useState } from 'react';
-import { useAppState, useSession, useStore } from './state';
-import { Cash } from './ui/Cash';
-import { Login } from './ui/Login';
-import { Menu } from './ui/Menu';
-import { Orders } from './ui/Orders';
-import { Reports } from './ui/Reports';
-import { Sell } from './ui/Sell';
-import { Settings } from './ui/Settings';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useAppState, useUi } from './state';
+import { Accounts } from './ui/Accounts';
+import { Admin } from './ui/Admin';
+import { Kitchen } from './ui/Kitchen';
+import { Tables } from './ui/Tables';
+import { TableView } from './ui/TableView';
 
-type View = 'vender' | 'pedidos' | 'caja' | 'reportes' | 'carta' | 'ajustes';
+type Tab = 'mesas' | 'cocina' | 'cuentas' | 'config';
+
+const Icon = ({ d }: { d: ReactNode }) => (
+  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {d}
+  </svg>
+);
+const ICONS: Record<Tab, ReactNode> = {
+  mesas: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
+    </>
+  ),
+  cocina: (
+    <>
+      <path d="M6 13.5a6 6 0 0 1 12 0" />
+      <path d="M4 13.5h16v2a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" />
+      <path d="M12 5v2.5" />
+    </>
+  ),
+  cuentas: (
+    <>
+      <path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z" />
+      <path d="M9 8.5h6M9 12h6M9 15.5h3" />
+    </>
+  ),
+  config: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1" />
+    </>
+  ),
+};
+
+function readHash(): { tab: Tab; table: string | null } {
+  const h = location.hash.replace('#', '');
+  if (h === 'cocina' || h === 'cuentas' || h === 'config') return { tab: h, table: null };
+  return { tab: 'mesas', table: null };
+}
 
 export default function App() {
-  const { user, setUser } = useSession();
   const state = useAppState();
-  const store = useStore();
-  const [view, setView] = useState<View>('vender');
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [sellKey, setSellKey] = useState(0);
+  const { isAdmin } = useUi();
+  const [tab, setTab] = useState<Tab>(() => readHash().tab);
+  const [table, setTable] = useState<string | null>(null);
 
-  if (!user) return <Login />;
+  useEffect(() => {
+    try {
+      history.replaceState(null, '', tab === 'mesas' ? location.pathname : `#${tab}`);
+    } catch {
+      /* el visor puede no permitirlo */
+    }
+    window.scrollTo(0, 0);
+  }, [tab, table]);
 
-  const isAdmin = user.role === 'admin';
-  const shiftOpen = state.shifts.some((s) => !s.closedAt);
-  const openCount = state.orders.filter((o) => o.status === 'abierto').length;
+  const kitchenCount = state.comandas.filter((c) => c.status === 'pendiente' || c.status === 'preparando').length;
+  const readyCount = state.comandas.filter((c) => c.status === 'listo').length;
 
-  const tabs: { v: View; label: string; admin?: boolean }[] = [
-    { v: 'vender', label: 'Vender' },
-    { v: 'pedidos', label: `Pedidos${openCount ? ` (${openCount})` : ''}` },
-    { v: 'caja', label: 'Caja' },
-    { v: 'reportes', label: 'Reportes', admin: true },
-    { v: 'carta', label: 'Carta' },
-    { v: 'ajustes', label: 'Ajustes', admin: true },
+  const tabs: { t: Tab; label: string; badge?: number }[] = [
+    { t: 'mesas', label: 'Mesas', badge: readyCount },
+    { t: 'cocina', label: 'Cocina', badge: kitchenCount },
+    { t: 'cuentas', label: 'Cuentas' },
+    { t: 'config', label: isAdmin ? 'Admin' : 'Configurar' },
   ];
-
-  const openOrder = (id: string) => {
-    setOpenId(id);
-    setSellKey((k) => k + 1);
-    setView('vender');
-  };
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden>
-            ❀
-          </span>
-          <span>{state.settings.businessName}</span>
-        </div>
-        <nav className="tabs">
-          {tabs
-            .filter((t) => !t.admin || isAdmin)
-            .map((t) => (
-              <button key={t.v} className={view === t.v ? 'on' : ''} onClick={() => setView(t.v)} aria-current={view === t.v ? 'page' : undefined}>
-                {t.label}
-              </button>
-            ))}
-        </nav>
-        <div className="who">
-          <span className={`dot ${shiftOpen ? 'ok' : 'off'}`} title={shiftOpen ? 'Caja abierta' : 'Caja cerrada'} />
-          <span className="who-name">{user.name}</span>
-          <button className="ghost small" onClick={() => setUser(null)}>
-            Salir
-          </button>
-        </div>
-      </header>
-      {!shiftOpen && view === 'vender' && (
-        <div className="banner">
-          La caja está cerrada: puedes tomar pedidos, pero para cobrar{' '}
-          <button className="link" onClick={() => setView('caja')}>
-            abre la caja
-          </button>
-          .
-        </div>
-      )}
-      <main className="main">
-        {view === 'vender' && (
-          <Sell
-            key={sellKey}
-            orderId={openId}
-            onDone={() => {
-              setOpenId(null);
-              try {
-                localStorage.removeItem('dolce-rosa:draft');
-              } catch {
-                /* nada */
-              }
-            }}
-          />
-        )}
-        {view === 'pedidos' && (
-          <Orders
-            onOpen={openOrder}
-            onNewTable={(tableId) => {
-              const o = { ...store.newOrder(user.id, 'mesa', tableId) };
-              try {
-                localStorage.setItem('dolce-rosa:draft', JSON.stringify(o));
-              } catch {
-                /* nada */
-              }
-              setOpenId(null);
-              setSellKey((k) => k + 1);
-              setView('vender');
-            }}
-          />
-        )}
-        {view === 'caja' && <Cash />}
-        {view === 'reportes' && isAdmin && <Reports />}
-        {view === 'carta' && <Menu />}
-        {view === 'ajustes' && isAdmin && <Settings />}
+      <main className="content">
+        {tab === 'mesas' && (table ? <TableView key={table} tableId={table} onBack={() => setTable(null)} /> : <Tables onOpen={setTable} />)}
+        {tab === 'cocina' && <Kitchen />}
+        {tab === 'cuentas' && <Accounts />}
+        {tab === 'config' && <Admin />}
       </main>
+      <nav className="tabbar" aria-label="Secciones">
+        {tabs.map(({ t, label, badge }) => (
+          <button
+            key={t}
+            className={tab === t ? 'on' : ''}
+            aria-current={tab === t ? 'page' : undefined}
+            onClick={() => {
+              if (t === tab && t === 'mesas') setTable(null);
+              setTab(t);
+            }}
+          >
+            <span className="tb-icon">
+              <Icon d={ICONS[t]} />
+              {!!badge && <span className={`tb-badge ${t === 'mesas' ? 'ok' : ''}`}>{badge}</span>}
+            </span>
+            <span className="tb-label">{label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

@@ -1,127 +1,102 @@
 import { describe, expect, it } from 'vitest';
-import { amountDue, buildReport, expectedCash, netAndTax, roundCash, saleTotal } from './calc';
+import { accountDue, accountTotal, netAndTax, summarize, turnoOf } from './calc';
+import { demoState } from './demo';
 import { memoryPersistence, Store } from './store';
-import { CASH, type OrderItem } from './types';
 
-const item = (unitPrice: number, qty = 1, productId = 'p'): OrderItem => ({
-  id: Math.random().toString(),
-  productId,
-  name: 'X',
-  extras: [],
-  unitPrice,
-  qty,
-  note: '',
-  sentQty: 0,
-});
+const setup = (at = '2026-11-05T11:00:00') => {
+  const s = new Store(memoryPersistence());
+  s.now = () => new Date(at);
+  const st = s.get();
+  const table = st.tables[0];
+  const prod = (name: string) => st.products.find((p) => p.name === name)!;
+  return { s, table, prod };
+};
 
 describe('cálculos', () => {
-  it('redondeo del efectivo a la decena', () => {
-    expect(roundCash(3990)).toBe(3990);
-    expect(roundCash(3991)).toBe(3990);
-    expect(roundCash(3995)).toBe(3990);
-    expect(roundCash(3996)).toBe(4000);
-    expect(roundCash(3999)).toBe(4000);
-  });
-
-  it('neto e IVA desde total con IVA incluido', () => {
+  it('neto e IVA', () => {
     expect(netAndTax(11900)).toEqual({ neto: 10000, iva: 1900 });
-    const { neto, iva } = netAndTax(3333);
-    expect(neto + iva).toBe(3333);
   });
-
-  it('descuentos por monto y porcentaje, sin pasar el subtotal', () => {
-    const items = [item(2000, 2), item(1000)];
-    expect(saleTotal({ items, discount: { kind: 'porcentaje', value: 10 } })).toBe(4500);
-    expect(saleTotal({ items, discount: { kind: 'monto', value: 9999 } })).toBe(0);
-    expect(amountDue({ items, tip: 500, rounding: -5 })).toBe(5495);
+  it('turno según la hora de cambio', () => {
+    expect(turnoOf(new Date('2026-11-05T14:59:00'), 15)).toBe('mañana');
+    expect(turnoOf(new Date('2026-11-05T15:00:00'), 15)).toBe('tarde');
   });
 });
 
-describe('flujo de venta y caja', () => {
-  const setup = () => {
-    const s = new Store(memoryPersistence());
-    const admin = s.login('1234');
-    const cajero = s.login('0000');
-    return { s, admin, cajero };
-  };
-
-  it('no permite cobrar sin caja abierta', () => {
-    const { s, cajero } = setup();
-    const o = s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'llevar'), items: [item(2900)] });
-    expect(() => s.pay(cajero.id, o.id, [{ method: CASH, amount: 2900 }], 0, 0)).toThrow(/Abre la caja/);
+describe('mesa: pedido, comandas y detalle', () => {
+  it('suma extras y separa automáticamente barra y cocina', () => {
+    const { s, table, prod } = setup();
+    s.addLine(table.id, { productId: prod('Latte').id, variant: 'Grande', extras: ['Leche vegetal (avena)'], qty: 2, note: 'sin azúcar' });
+    const acc = s.addLine(table.id, { productId: prod('Waffle manjar plátano').id, extras: ['Helado'], qty: 1, note: '' });
+    expect(accountTotal(acc)).toBe((3400 + 600) * 2 + 4500 + 900);
+    const counts = s.send(acc.id);
+    expect(counts).toEqual({ barra: 2, cocina: 1 });
+    const coms = s.get().comandas;
+    expect(coms.map((c) => c.station).sort()).toEqual(['barra', 'cocina']);
+    expect(coms.find((c) => c.station === 'barra')!.items[0].note).toBe('sin azúcar');
+    expect(() => s.send(acc.id)).toThrow(/No hay productos nuevos/);
   });
 
-  it('cobra, cuadra la caja y reporta', () => {
-    const { s, cajero, admin } = setup();
-    s.startShift(cajero.id, 20000);
-    const o1 = s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'llevar'), items: [item(2995, 1, 'a')] });
-    // Efectivo: 2995 se redondea a 2990
-    s.pay(cajero.id, o1.id, [{ method: CASH, amount: 2990, received: 5000 }], 0, -5);
-    const mesa = s.get().tables[0].id;
-    const o2 = s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'mesa', mesa), items: [item(5000, 2, 'b')] });
-    expect(o2.number).toBe(2);
-    // Propina 1000, pago dividido
-    s.pay(cajero.id, o2.id, [
-      { method: 'Tarjeta débito', amount: 6000 },
-      { method: CASH, amount: 5000 },
-    ], 1000, 0);
-    s.addMovement(cajero.id, 'retiro', 3000, 'Compra de leche');
-
-    const shift = s.openShift()!;
-    expect(expectedCash(s.get(), shift)).toBe(20000 + 2990 + 5000 - 3000);
-
-    const r = buildReport(s.get(), new Date(0), new Date(Date.now() + 1000));
-    expect(r.orders).toBe(2);
-    expect(r.total).toBe(2995 + 10000);
-    expect(r.tips).toBe(1000);
-    expect(r.products[0].qty).toBe(2);
-
-    expect(() => s.voidOrder(cajero.id, o1.id, 'error')).toThrow(/administrador/);
-    s.voidOrder(admin.id, o1.id, 'cobrado dos veces');
-    expect(buildReport(s.get(), new Date(0), new Date(Date.now() + 1000)).voided.count).toBe(1);
-
-    s.closeShift(cajero.id, 21990);
-    const closed = s.get().shifts[0];
-    expect(closed.expectedCash).toBe(20000 + 5000 - 3000);
-    expect(s.openShift()).toBeUndefined();
+  it('solo se editan productos sin enviar y la cuenta vacía desaparece', () => {
+    const { s, table, prod } = setup();
+    const acc = s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    s.updateUnsent(acc.id, acc.lines[0].id, { qty: 0 });
+    expect(s.openAccountFor(table.id)).toBeUndefined();
+    const a2 = s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    s.send(a2.id);
+    expect(() => s.updateUnsent(a2.id, a2.lines[0].id, { qty: 3 })).toThrow(/administración/);
+    expect(() => s.removeSent(false, a2.id, a2.lines[0].id, 'x')).toThrow(/administración/);
+    s.removeSent(true, a2.id, a2.lines[0].id, 'error del mesero');
+    expect(s.openAccountFor(table.id)).toBeUndefined();
   });
 
-  it('rechaza pagos que no cuadran y mesas ocupadas', () => {
-    const { s, cajero } = setup();
-    s.startShift(cajero.id, 0);
-    const mesa = s.get().tables[0].id;
-    const o = s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'mesa', mesa), items: [item(1000)] });
-    expect(() => s.pay(cajero.id, o.id, [{ method: CASH, amount: 900 }], 0, 0)).toThrow(/no cuadran/);
-    expect(() => s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'mesa', mesa), items: [item(1)] })).toThrow(
-      /ya tiene/,
-    );
+  it('pide tamaño, rechaza agotados y extras inventados', () => {
+    const { s, table, prod } = setup();
+    expect(() => s.addLine(table.id, { productId: prod('Latte').id, extras: [], qty: 1, note: '' })).toThrow(/tamaño/);
+    expect(() => s.addLine(table.id, { productId: prod('Espresso').id, extras: ['Oro'], qty: 1, note: '' })).toThrow(/Extra/);
+    s.setSoldOut(true, prod('Pie de limón').id, true);
+    expect(() => s.addLine(table.id, { productId: prod('Pie de limón').id, extras: [], qty: 1, note: '' })).toThrow(/agotado/);
   });
 
-  it('archiva en vez de borrar productos con ventas y registra cambio de precio', () => {
-    const { s, admin, cajero } = setup();
-    const p = s.get().products[0];
-    s.saveOrder(cajero.id, { ...s.newOrder(cajero.id, 'llevar'), items: [item(p.price, 1, p.id)] });
-    expect(s.deleteProduct(admin.id, p.id)).toBe('archivado');
-    s.saveProduct(admin.id, { ...p, price: p.price + 100 });
-    expect(s.get().priceChanges).toHaveLength(1);
-    expect(() => s.saveProduct(cajero.id, { ...p, price: 1 })).toThrow(/administrador/);
+  it('emite el detalle en el turno correcto y libera la mesa', () => {
+    const { s, table, prod } = setup('2026-11-05T16:20:00');
+    const acc = s.addLine(table.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    expect(() => s.emit(acc.id, { tip: 0, paymentMethod: 'Débito' })).toThrow(/sin enviar/);
+    s.send(acc.id);
+    s.emit(acc.id, { tip: 200, paymentMethod: 'Débito', boleta: '123' });
+    const e = s.get().accounts.find((a) => a.id === acc.id)!;
+    expect(e).toMatchObject({ status: 'emitida', turno: 'tarde', day: '2026-11-05', boleta: '123' });
+    expect(accountDue(e)).toBe(2000);
+    expect(s.openAccountFor(table.id)).toBeUndefined();
+    // Un trabajador no puede tocar cuentas de otro turno.
+    s.now = () => new Date('2026-11-06T10:00:00');
+    expect(() => s.updateEmitted(false, acc.id, { checked: true })).toThrow(/tu turno/);
+    s.updateEmitted(true, acc.id, { checked: true });
+  });
+
+  it('cambia la cuenta de mesa sin pisar otra ocupada', () => {
+    const { s, prod } = setup();
+    const [t1, t2, t3] = s.get().tables;
+    const a = s.addLine(t1.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    s.addLine(t2.id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
+    expect(() => s.moveTable(a.id, t2.id)).toThrow(/ya tiene/);
+    s.moveTable(a.id, t3.id);
+    expect(s.openAccountFor(t3.id)?.id).toBe(a.id);
   });
 });
 
 describe('datos de prueba', () => {
-  it('genera un mes de ventas consistente', async () => {
-    const { demoState } = await import('./demo');
-    const { amountDue, paidSoFar } = await import('./calc');
-    const now = new Date('2026-11-03T16:30:00');
-    const s = demoState(now);
-    const paid = s.orders.filter((o) => o.status === 'pagado');
-    expect(paid.length).toBeGreaterThan(600);
-    for (const o of paid) expect(paidSoFar(o)).toBe(amountDue(o));
-    expect(s.shifts.filter((x) => !x.closedAt)).toHaveLength(1);
-    expect(s.orders.filter((o) => o.status === 'abierto')).toHaveLength(3);
-    const store = new Store(memoryPersistence(), () => s);
-    for (const sh of store.get().shifts.filter((x) => x.closedAt))
-      expect(sh.expectedCash).toBe(expectedCash(store.get(), sh));
-    expect(store.login('1111').name).toBe('Camila');
+  it('son consistentes y tienen trabajo para cocina', () => {
+    const now = new Date('2026-11-05T16:30:00');
+    const st = demoState(now);
+    const sum = summarize(st, '2026-10-06', '2026-11-05');
+    expect(sum.count).toBeGreaterThan(700);
+    expect(sum.byTurno.every((t) => t.count > 0)).toBe(true);
+    expect(st.accounts.filter((a) => a.status === 'abierta')).toHaveLength(5);
+    const kitchen = st.comandas.filter((c) => c.station === 'cocina' && c.status !== 'entregado');
+    expect(kitchen.length).toBeGreaterThanOrEqual(3);
+    // Las líneas de cuentas abiertas apuntan a comandas existentes.
+    for (const a of st.accounts.filter((x) => x.status === 'abierta'))
+      for (const l of a.lines) if (l.sentAt) expect(st.comandas.some((c) => c.id === l.comandaId)).toBe(true);
+    expect(st.accounts.every((a) => a.status !== 'emitida' || a.emittedAt! <= now.toISOString())).toBe(true);
   });
 });
