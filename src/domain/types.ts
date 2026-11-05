@@ -113,6 +113,8 @@ export interface Settings {
   /** Hora (0-23) en que empieza el turno de la tarde. */
   afternoonStartsAt: number;
   adminPin: string;
+  /** Abrir la impresión del detalle apenas se emite (por defecto sí). */
+  printOnEmit?: boolean;
 }
 
 export interface AuditEntry {

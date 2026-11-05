@@ -678,6 +678,10 @@ function SettingsAdmin() {
       </section>
       <section className="group">
         <h2 className="group-title">Detalle de cuenta</h2>
+        <label className="toggle">
+          <input type="checkbox" checked={s.printOnEmit !== false} onChange={(e) => setS({ ...s, printOnEmit: e.target.checked })} />
+          <span>Imprimir el detalle apenas se emite</span>
+        </label>
         {text('businessName', 'Nombre del local')}
         {text('address', 'Dirección')}
         {text('phone', 'Teléfono o Instagram')}

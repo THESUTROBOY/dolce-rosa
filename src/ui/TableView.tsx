@@ -554,6 +554,9 @@ function EmitSheet({ account, onClose, onDone }: { account: Account; onClose(): 
             const ok = run(() => (store.emit(account.id, { tip, paymentMethod: method, boleta }), true));
             if (ok) {
               navigator.vibrate?.([10, 40, 10]);
+              // Se imprime en el mismo toque para que el navegador no lo bloquee.
+              const done = store.get().accounts.find((a) => a.id === account.id);
+              if (done && canPrint && state.settings.printOnEmit !== false) printHtml(accountHtml(done, state.settings));
               onDone();
             }
           }}
@@ -649,10 +652,12 @@ function EmittedView({ account, onDone }: { account: Account; onDone(): void }) 
         </footer>
       </article>
       <div className="actions">
-        {canPrint && (
+        {canPrint ? (
           <button className="btn-secondary wide" onClick={() => printHtml(accountHtml(account, state.settings))}>
-            Imprimir detalle
+            Imprimir de nuevo
           </button>
+        ) : (
+          <p className="hint center">En esta vista de prueba no se puede imprimir. En la app instalada en el local, la impresión se abre sola al emitir.</p>
         )}
         <button className="btn-primary wide" onClick={onDone}>
           Volver a mesas
