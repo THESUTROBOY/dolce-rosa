@@ -647,6 +647,10 @@ function SettingsAdmin() {
           <input type="checkbox" checked={s.printOnEmit !== false} onChange={(e) => setS({ ...s, printOnEmit: e.target.checked })} />
           <span>Imprimir el detalle apenas se emite</span>
         </label>
+        <label className="toggle">
+          <input type="checkbox" checked={s.printOnSend !== false} onChange={(e) => setS({ ...s, printOnSend: e.target.checked })} />
+          <span>Imprimir las comandas apenas se envían a cocina y barra</span>
+        </label>
         {text('businessName', 'Nombre del local')}
         {text('address', 'Dirección')}
         {text('phone', 'Teléfono o Instagram')}

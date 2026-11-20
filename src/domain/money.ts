@@ -335,3 +335,23 @@ export function shiftReport(state: AppState, day: string, turno: Turno, now = ne
     pendingAccounts: state.accounts.filter((a) => isPending(a) && a.day === day && a.turno === turno).length,
   };
 }
+
+/** Cifras del cierre en el formato acordado: ventas con propina por medio, propinas aparte y saldo líquido. */
+export function shiftSummary(r: ShiftReport) {
+  const tipFees = r.tipFees ?? 0;
+  const expenses = r.expenses.reduce((a, e) => a + e.amount, 0);
+  const totalWithTips = r.byMethod.reduce((a, m) => a + m.amount, 0);
+  const tipsForStaff = r.tips - tipFees;
+  return {
+    methods: r.byMethod.filter((m) => m.count),
+    tipMethods: r.byMethod.filter((m) => m.tip),
+    totalWithTips,
+    tipFees,
+    tipsForStaff,
+    fees: r.fees,
+    expenses,
+    // Lo que le queda a Dolce Rosa del turno: total cobrado − propinas − comisiones − gastos.
+    liquid: totalWithTips - r.tips - r.fees - expenses,
+  };
+}
+

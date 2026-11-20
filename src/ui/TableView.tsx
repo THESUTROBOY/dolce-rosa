@@ -3,7 +3,7 @@ import { accountDiscount, accountDue, accountSubtotal, accountTotal, clp, discou
 import { splitTip } from '../domain/money';
 import type { Account, Comanda, Line, PayMethod, Product, Station } from '../domain/types';
 import { PAY_LABEL, PAY_METHODS, STATION_LABEL } from '../domain/types';
-import { accountHtml, printHtml } from '../print';
+import { accountHtml, comandaHtml, printHtml } from '../print';
 import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
 import { MoneyField, Segmented, Sheet, Stepper } from './kit';
 
@@ -394,8 +394,13 @@ function SendSheet({ account, onClose }: { account: Account; onClose(): void }) 
         <button
           className="btn-primary wide"
           onClick={() => {
+            const before = new Set(store.get().comandas.map((c) => c.id));
             const r = run(() => store.send(account.id));
             if (!r) return;
+            if (canPrint && store.get().settings.printOnSend !== false) {
+              const fresh = store.get().comandas.filter((c) => !before.has(c.id));
+              if (fresh.length) printHtml(fresh.map((c) => comandaHtml(c)).join('<div style="break-after:page"></div>'));
+            }
             const parts = [r.cocina && `${r.cocina} a cocina`, r.barra && `${r.barra} a barra`].filter(Boolean).join(' y ');
             toast(`Enviado: ${parts}`);
             navigator.vibrate?.(15);

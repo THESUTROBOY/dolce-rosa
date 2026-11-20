@@ -1,5 +1,6 @@
 import { accountTotal, clp, dayKey, folioLabel, occupiesTable, scoopsFor, turnoOf } from './calc';
 import { DEFAULT_FEES, DEFAULT_SETTLE_DAYS, DOC_TYPES, EXPENSE_CATEGORIES, EXPENSE_METHODS } from './defaults';
+import { applyMenu2 } from './menu2';
 import { makePayment, methodsLabel, shiftReport, splitTip } from './money';
 import { seedState } from './seed';
 import type {
@@ -63,6 +64,7 @@ export function migrate(raw: unknown): AppState | null {
   st.expenseCategories ??= [...EXPENSE_CATEGORIES];
   st.expenseMethods ??= [...EXPENSE_METHODS];
   st.docTypes ??= [...DOC_TYPES];
+  applyMenu2(s as AppState);
   return s as AppState;
 }
 const withFolio = (s: AppState) => migrate(s)!;

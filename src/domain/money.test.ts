@@ -37,7 +37,7 @@ describe('propina', () => {
 describe('descuentos y promociones', () => {
   it('aplica promociones por producto o por cuenta y bloquea descuentos manuales a trabajadores', () => {
     const { s, prod, emitted } = setup();
-    const a = emitted(['Latte', 'Brownie']);
+    const a = emitted(['Latte', 'Torta de yogurt']);
     s.savePromotion(true, { id: 'p1', name: 'Latte 20%', kind: 'percent', value: 20, productIds: [prod('Latte').id], categoryIds: [], active: true });
     s.applyDiscount(false, a.id, { promoId: 'p1', name: 'Latte 20%', kind: 'percent', value: 20, productIds: [prod('Latte').id] });
     expect(accountTotal(s.get().accounts.find((x) => x.id === a.id)!)).toBe(3290 + 3290 - 658);
@@ -53,7 +53,7 @@ describe('descuentos y promociones', () => {
 describe('cobro', () => {
   it('registra pagos combinados con propina, comisión y abono pendiente', () => {
     const { s, emitted } = setup();
-    const a = emitted(['Latte', 'Brownie']); // 6.580
+    const a = emitted(['Latte', 'Torta de yogurt']); // 6.580
     const tip = suggestedTip(6580, 10); // 658
     expect(() => s.pay(a.id, { tip, payments: [{ method: 'efectivo', amount: 3000 }] })).toThrow(/deben sumar \$7.238/);
     s.pay(a.id, { tip, payments: [{ method: 'efectivo', amount: 3000, tip: 0 }, { method: 'debito', amount: 4238, tip: 658 }] });
@@ -138,7 +138,7 @@ describe('gastos, movimientos y finanzas', () => {
     const a = emitted(['Latte']);
     s.pay(a.id, { tip: 329, paymentMethod: 'efectivo' });
     s.now = () => new Date('2026-11-21T11:00:00'); // sábado
-    const b = emitted(['Brownie'], 1);
+    const b = emitted(['Torta de yogurt'], 1);
     s.pay(b.id, { tip: 500, paymentMethod: 'debito' });
     let [w] = tipWeeks(s.get());
     expect(w).toMatchObject({ week: '2026-11-16', accrued: { lv: 329, sd: 500 }, paid: { lv: 0, sd: 0 } });
@@ -163,7 +163,7 @@ describe('cierres de turno', () => {
     expect(c.report).toMatchObject({ sales: 1, consumo: 3290, tips: 329, cashStart: 0, cashEnd: 3290 + 329 - 2000 });
     expect(c.report.byMethod.find((m) => m.method === 'efectivo')).toMatchObject({ count: 1, amount: 3619 });
     expect(() => s.closeShift('2026-11-18', 'mañana', { note: '' })).toThrow(/ya está cerrado/);
-    const b = emitted(['Brownie'], 1);
+    const b = emitted(['Torta de yogurt'], 1);
     s.pay(b.id, { tip: 0, paymentMethod: 'efectivo' });
     const pm = shiftReport(s.get(), '2026-11-18', 'tarde', new Date('2026-11-18T18:00:00'));
     expect(pm).toMatchObject({ sales: 1, cashStart: 1619, cashEnd: 1619 + 3290 });

@@ -2748,3 +2748,34 @@ textarea {
     grid-column: 2;
   }
 }
+
+/* Cierre de turno en el formato acordado */
+.close-liquid {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--gold-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.close-liquid > span {
+  font-weight: 600;
+}
+.close-liquid strong {
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--brand);
+}
+.close-liquid strong.neg {
+  color: var(--danger);
+}
+.close-liquid small {
+  color: var(--muted);
+}
+.tip-sums {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}

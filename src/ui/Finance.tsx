@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { addDays, clp, dayKey, fmtDay, folioLabel, weekOf } from '../domain/calc';
-import { bucketOf, finance, sales, shiftReport, tipNet, tipWeeks } from '../domain/money';
+import { bucketOf, finance, sales, shiftReport, shiftSummary, tipNet, tipWeeks } from '../domain/money';
 import { uid } from '../domain/store';
 import type { Account, CashCount, Fund, PayMethod, MovementKind, Reserve, ShiftClose, ShiftReport, TipBucket, Turno } from '../domain/types';
 import { FUND_LABEL, MOVEMENT_LABEL, PAY_LABEL, PAY_METHODS, TIP_BUCKET_LABEL, TURNO_LABEL } from '../domain/types';
 import { printHtml, shiftHtml } from '../print';
 import { canPrint, useAction, useAppState, useNow, useStore, useUi } from '../state';
-import { Chips, Empty, Kpi, MoneyField, Segmented, Sheet } from './kit';
+import { Chips, Empty, Kpi, MoneyField, periodOf, PeriodPicker, Segmented, Sheet, type Period } from './kit';
 import { PaySheet, ReasonSheet } from './TableView';
 
 const FUNDS = [
@@ -23,7 +23,7 @@ export function FinanceView() {
   useNow(60000);
   const f = finance(state);
   const [moving, setMoving] = useState(false);
-  const [opening, setOpening] = useState(false);
+  const [opening, setOpening] = useState<false | 'editar' | 'nuevo'>(false);
   const [reserves, setReserves] = useState(false);
   const [voiding, setVoiding] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -85,9 +85,14 @@ export function FinanceView() {
       <section className="group">
         <h2 className="group-title">
           Acumulado desde {since}
-          <button className="btn-plain small" onClick={() => setOpening(true)}>
-            Saldos iniciales
-          </button>
+          <span className="btn-row">
+            <button className="btn-plain small" onClick={() => setOpening('editar')}>
+              Saldos iniciales
+            </button>
+            <button className="btn-plain small" onClick={() => setOpening('nuevo')}>
+              Nuevo período
+            </button>
+          </span>
         </h2>
         <ul className="list">
           <li className="kv">
@@ -173,7 +178,7 @@ export function FinanceView() {
       </section>
 
       {moving && <MovementSheet onClose={() => setMoving(false)} />}
-      {opening && <OpeningSheet onClose={() => setOpening(false)} />}
+      {opening && <OpeningSheet fresh={opening === 'nuevo' ? f : undefined} onClose={() => setOpening(false)} />}
       {reserves && <ReservesSheet onClose={() => setReserves(false)} />}
       {voiding && (
         <ReasonSheet
@@ -268,29 +273,40 @@ function MovementSheet({ onClose, preset }: { onClose(): void; preset?: { kind: 
   );
 }
 
-function OpeningSheet({ onClose }: { onClose(): void }) {
+/** Saldos iniciales. Con `fresh` comienza un período nuevo: parte hoy con los saldos actuales y el historial se conserva. */
+function OpeningSheet({ onClose, fresh }: { onClose(): void; fresh?: ReturnType<typeof finance> }) {
   const state = useAppState();
   const store = useStore();
   const run = useAction();
   const { isAdmin } = useUi();
-  const [cash, setCash] = useState(state.settings.openingCash);
-  const [bank, setBank] = useState(state.settings.openingBank);
-  const [date, setDate] = useState(state.settings.openingDate || dayKey(new Date()));
+  const [cash, setCash] = useState(fresh ? fresh.cash : state.settings.openingCash);
+  const [bank, setBank] = useState(fresh ? fresh.bank : state.settings.openingBank);
+  const [date, setDate] = useState(fresh ? addDays(dayKey(new Date()), 1) : state.settings.openingDate || dayKey(new Date()));
   return (
     <Sheet
-      title="Saldos iniciales"
+      title={fresh ? 'Comenzar nuevo período' : 'Saldos iniciales'}
       onClose={onClose}
       footer={
         <button
           className="btn-primary wide"
           onClick={() => {
-            if (run(() => (store.saveSettings(isAdmin, { ...state.settings, openingCash: cash, openingBank: bank, openingDate: date }), true), 'Saldos guardados')) onClose();
+            if (run(() => (store.saveSettings(isAdmin, { ...state.settings, openingCash: cash, openingBank: bank, openingDate: date }), true), fresh ? 'Nuevo período iniciado' : 'Saldos guardados')) onClose();
           }}
         >
           Guardar
         </button>
       }
     >
+      {fresh && (
+        <>
+          <p className="hint">Hazlo al cerrar el día: el período nuevo parte mañana con los saldos de hoy (revísalos con la cuadratura). No se borra nada: ventas, gastos, cierres y reportes anteriores quedan en el historial.</p>
+          {(fresh.tipsPending > 0 || fresh.pendingMp > 0 || fresh.pendingTransfers > 0) && (
+            <p className="hint warn-text">
+              Antes de empezar conviene dejar en cero lo pendiente: propinas por entregar {clp(fresh.tipsPending)}, abonos de Mercado Pago {clp(fresh.pendingMp)} y transferencias {clp(fresh.pendingTransfers)}. Lo pendiente de antes de la fecha no se arrastra.
+            </p>
+          )}
+        </>
+      )}
       <p className="hint">Lo que había en la caja y en la cuenta bancaria al empezar a usar el control. Las ventas, gastos y movimientos anteriores a esa fecha no cambian los saldos (quedan en los reportes).</p>
       <label className="field" htmlFor="op-date">
         <span>Fecha de inicio</span>
@@ -625,42 +641,49 @@ const tipLine = (ps: { method: PayMethod; tip: number }[]) =>
     .map((p) => `${PAY_LABEL[p.method]} ${clp(p.tip)}`)
     .join(' · ');
 
-/** Propina de cada cuenta cobrada en un día, con opción de cambiarla. */
+/** Sumatoria de propinas por turno y medio en un período, con la propina de cada cuenta para cambiarla. */
 function TipsByAccount() {
   const state = useAppState();
-  const [day, setDay] = useState(dayKey(new Date()));
+  const today = dayKey(new Date());
+  const [period, setPeriod] = useState<Period>(() => periodOf('dia', today));
   const [editing, setEditing] = useState<Account | null>(null);
   const [all, setAll] = useState(false);
   const list = sales(state)
-    .filter((x) => x.day === day)
+    .filter((x) => x.day >= period.from && x.day <= period.to)
     .reverse();
-  const totals = PAY_METHODS.map((m) => ({ m, t: list.reduce((a, x) => a + x.payments.filter((p) => p.method === m).reduce((b, p) => b + tipNet(p, state.settings), 0), 0) })).filter((x) => x.t || x.m === 'efectivo' || x.m === 'debito');
+  const net = (x: (typeof list)[number], m?: PayMethod) => x.payments.filter((p) => !m || p.method === m).reduce((b, p) => b + tipNet(p, state.settings), 0);
+  const byMethod = PAY_METHODS.map((m) => ({ m, t: list.reduce((a, x) => a + net(x, m), 0) })).filter((x) => x.t || x.m === 'efectivo' || x.m === 'debito');
+  const byTurno = (['mañana', 'tarde'] as Turno[]).map((t) => ({ t, v: list.filter((x) => x.turno === t).reduce((a, x) => a + net(x), 0) }));
+  const total = list.reduce((a, x) => a + net(x), 0);
   return (
     <section className="group">
-      <h2 className="group-title">Propina de cada cuenta</h2>
-      <div className="field-row">
-        <label className="field grow" htmlFor="tips-day">
-          <span>Día</span>
-          <input id="tips-day" type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
-        </label>
+      <h2 className="group-title">Sumatoria de propinas</h2>
+      <PeriodPicker value={period} onChange={setPeriod} today={today} />
+      <div className="tip-sums">
+        <Kpi lead label="Total propinas" value={clp(total)} sub={`${list.filter((x) => x.tip).length} de ${list.length} cuentas con propina`} />
+        {byTurno.map(({ t, v }) => (
+          <Kpi key={t} label={`Turno ${TURNO_LABEL[t]}`} value={clp(v)} />
+        ))}
       </div>
       <ul className="sum-methods">
-        {totals.map(({ m, t }) => (
+        {byMethod.map(({ m, t }) => (
           <li key={m}>
-            <span>{PAY_LABEL[m]}</span>
+            <span>Propinas {PAY_LABEL[m].toLowerCase()}</span>
             <span />
             <strong>{clp(t)}</strong>
           </li>
         ))}
       </ul>
+      <h3 className="mini-title">Propina de cada cuenta</h3>
       {list.length === 0 ? (
-        <Empty title="Sin cuentas cobradas ese día" />
+        <Empty title="Sin cuentas cobradas en este período" />
       ) : (
         <ul className="list">
           {(all ? list : list.slice(0, 6)).map((x) => (
             <li key={x.account.id} className="kv">
               <span>
-                {folioLabel(x.account.folio)} · {x.account.tableName} · {TURNO_LABEL[x.turno]} {new Date(x.at).toLocaleTimeString('es-CL', { timeStyle: 'short' })}
+                {folioLabel(x.account.folio)} · {x.account.tableName} · {period.from !== period.to ? `${fmtDay(x.day, { day: 'numeric', month: 'short' })} ` : ''}
+                {TURNO_LABEL[x.turno]} {new Date(x.at).toLocaleTimeString('es-CL', { timeStyle: 'short' })}
                 <small className="block muted">
                   consumo {clp(x.consumo)} · {x.tip ? `propina ${tipLine(x.payments)}` : 'sin propina'}
                 </small>
@@ -675,7 +698,7 @@ function TipsByAccount() {
       )}
       {list.length > 6 && (
         <button className="btn-plain" onClick={() => setAll(!all)}>
-          {all ? 'Ver menos' : `Ver las ${list.length} cuentas del día`}
+          {all ? 'Ver menos' : `Ver las ${list.length} cuentas`}
         </button>
       )}
       {editing && <PaySheet account={editing} correcting onClose={() => setEditing(null)} onDone={() => setEditing(null)} />}
@@ -728,54 +751,60 @@ function TipPayoutSheet({ week, bucket, pending, onClose }: { week: string; buck
 
 // ---------------- Cierres de turno ----------------
 const minus = (n: number) => (n ? `−${clp(n)}` : clp(0));
+const SALES_LABEL: Record<PayMethod, string> = { efectivo: 'Ventas efectivo', debito: 'Ventas débito', credito: 'Ventas crédito', transferencia: 'Transferencias' };
+
 export function ShiftReportView({ r, full }: { r: ShiftReport; full: boolean }) {
-  const tipMethods = r.byMethod.filter((m) => m.tip);
-  const tipFees = r.tipFees ?? 0;
+  const x = shiftSummary(r);
   return (
     <div className="shift-report">
-      <div className="kpis">
-        <Kpi lead label="Ventas Dolce Rosa (sin propina)" value={clp(r.consumo)} sub={`${r.sales} ${r.sales === 1 ? 'cuenta' : 'cuentas'}${r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''}`} />
-        <Kpi label="Comisiones" value={clp(r.fees)} />
-        <Kpi label="Ingreso líquido" value={clp(r.net)} tone="gold" />
-      </div>
-      <h3 className="mini-title">Medios de pago (ventas sin propina)</h3>
-      <ul className="list">
-        {r.byMethod
-          .filter((m) => m.count)
-          .map((m) => (
-            <li key={m.method} className="kv">
-              <span>
-                {PAY_LABEL[m.method]} <span className="muted">· {m.count}</span>
-              </span>
-              <span className="muted">{m.fee ? `comisión ${clp(m.fee)}` : ''}</span>
-              <strong>{clp(m.amount - m.tip)}</strong>
-            </li>
-          ))}
-        {!r.byMethod.some((m) => m.count) && <li className="kv muted">Sin cobros en este turno</li>}
-      </ul>
-      <div className="tip-box">
-        <h3 className="mini-title">Propinas de las meseras · no son de Dolce Rosa</h3>
-        <ul className="list">
-          {tipMethods.map((m) => (
-            <li key={m.method} className="kv">
-              <span>{PAY_LABEL[m.method]}</span>
-              <span />
-              <strong>{clp(m.tip)}</strong>
-            </li>
-          ))}
-          {tipFees > 0 && (
-            <li className="kv">
-              <span>Comisión descontada de la propina</span>
-              <span />
-              <strong>{minus(tipFees)}</strong>
-            </li>
-          )}
-          <li className="kv kv-total">
-            <span>Total para las meseras</span>
+      <ul className="list close-sheet">
+        {x.methods.map((m) => (
+          <li key={m.method} className="kv">
+            <span>
+              {SALES_LABEL[m.method]} <span className="muted">· {m.count}</span>
+            </span>
             <span />
-            <strong>{clp(r.tips - tipFees)}</strong>
+            <strong>{clp(m.amount)}</strong>
           </li>
-        </ul>
+        ))}
+        {!x.methods.length && <li className="kv muted">Sin cobros en este turno</li>}
+        <li className="kv kv-total">
+          <span>Total con propinas</span>
+          <span />
+          <strong>{clp(x.totalWithTips)}</strong>
+        </li>
+        {x.tipMethods.map((m) => (
+          <li key={m.method} className="kv">
+            <span>Propinas {PAY_LABEL[m.method].toLowerCase()}</span>
+            <span />
+            <strong>{clp(m.tip)}</strong>
+          </li>
+        ))}
+        <li className="kv">
+          <span>Comisiones</span>
+          <span className="muted">Mercado Pago</span>
+          <strong>{clp(x.fees + x.tipFees)}</strong>
+        </li>
+        <li className="kv">
+          <span>Gastos</span>
+          <span className="muted">
+            caja {clp(r.expenses[0].amount)} · banco {clp(r.expenses[1].amount)}
+          </span>
+          <strong>{clp(x.expenses)}</strong>
+        </li>
+        <li className="kv kv-total">
+          <span>Total propinas</span>
+          <span className="muted">{x.tipFees ? `de las meseras, ya sin comisión ${clp(x.tipFees)}` : 'de las meseras, no de Dolce Rosa'}</span>
+          <strong>{clp(x.tipsForStaff)}</strong>
+        </li>
+      </ul>
+      <div className="close-liquid">
+        <span>Saldo líquido del turno</span>
+        <strong className={x.liquid < 0 ? 'neg' : ''}>{clp(x.liquid)}</strong>
+        <small>
+          Ventas sin propina {clp(r.consumo)}
+          {r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''} · {r.sales} {r.sales === 1 ? 'cuenta' : 'cuentas'}
+        </small>
       </div>
       <h3 className="mini-title">Caja</h3>
       <ul className="list">

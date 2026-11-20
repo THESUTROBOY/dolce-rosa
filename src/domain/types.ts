@@ -215,6 +215,10 @@ export interface Settings {
   adminPin: string;
   /** Abrir la impresión del detalle apenas se emite (por defecto sí). */
   printOnEmit?: boolean;
+  /** Imprimir las comandas apenas se envían a cocina y barra. */
+  printOnSend?: boolean;
+  /** Última actualización de carta aplicada (ver menu2.ts). */
+  menuVersion?: number;
   /** Sabores de helado disponibles hoy. Cualquiera los agrega o quita cuando se acaban. */
   iceCreamFlavors?: string[];
 }

@@ -1,6 +1,6 @@
 import { accountDue, accountSubtotal, accountTotal, clp, discountOf, fmtDay, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
-import { paymentsOf } from './domain/money';
-import type { Account, Comanda, Settings, ShiftClose } from './domain/types';
+import { paymentsOf, shiftSummary } from './domain/money';
+import type { Account, Comanda, PayMethod, Settings, ShiftClose } from './domain/types';
 import { PAY_LABEL, STATION_LABEL, TURNO_LABEL } from './domain/types';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -68,23 +68,21 @@ export function printHtml(html: string) {
   }, 60);
 }
 
+const SALES: Record<PayMethod, string> = { efectivo: 'Ventas efectivo', debito: 'Ventas débito', credito: 'Ventas crédito', transferencia: 'Transferencias' };
+
 export function shiftHtml(c: ShiftClose, business: string) {
   const r = c.report;
+  const x = shiftSummary(r);
   const row = (a: string, b: string) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
-  return `<style>${PAGE}</style><h1>${esc(business)}</h1><div class="c"><b>CIERRE DE TURNO ${TURNO_LABEL[c.turno]}</b></div>
+  return `<style>${PAGE} .big{font-size:22px}</style><div class="c"><b>${esc(business)} | Cierre de turno ${TURNO_LABEL[c.turno]}</b></div>
   <div class="c s">${fmtDay(c.day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="c s">Cerró ${esc(c.by)} · ${when(c.closedAt)}</div><hr>
-  ${row('Cuentas', String(r.sales))}${r.discounts ? row('Descuentos', clp(r.discounts)) : ''}${row('Ventas sin propina', clp(r.consumo))}${row('Comisiones', clp(r.fees))}
-  <div class="r b"><span>Ingreso líquido</span><span>${clp(r.net)}</span></div><hr>
-  ${r.byMethod
-    .filter((m) => m.count)
-    .map((m) => row(`${PAY_LABEL[m.method]} (${m.count})`, clp(m.amount - m.tip)))
-    .join('')}<hr>
-  <div class="c"><b>PROPINAS MESERAS</b></div>
-  ${r.byMethod
-    .filter((m) => m.tip)
-    .map((m) => row(PAY_LABEL[m.method], clp(m.tip)))
-    .join('')}${r.tipFees ? row('Comisión propina', '-' + clp(r.tipFees)) : ''}
-  <div class="r b"><span>Total meseras</span><span>${clp(r.tips - (r.tipFees ?? 0))}</span></div><hr>
+  ${x.methods.map((m) => row(`${SALES[m.method]} (${m.count})`, clp(m.amount))).join('')}
+  <div class="r b"><span>Total con propinas</span><span>${clp(x.totalWithTips)}</span></div>
+  ${x.tipMethods.map((m) => row(`Propinas ${PAY_LABEL[m.method].toLowerCase()}`, clp(m.tip))).join('')}
+  ${row('Comisiones', clp(x.fees + x.tipFees))}${row('Gastos', clp(x.expenses))}
+  <div class="r b"><span>Total propinas</span><span>${clp(x.tipsForStaff)}</span></div><hr>
+  <div class="c">Saldo líquido del turno</div><div class="c big"><b>${clp(x.liquid)}</b></div>
+  <div class="c s">Ventas sin propina ${clp(r.consumo)} · ${r.sales} cuentas${r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''}</div><hr>
   ${row('Efectivo inicio', clp(r.cashStart))}${row('Gastos caja', '-' + clp(r.expenses[0].amount))}${row('Gastos banco', '-' + clp(r.expenses[1].amount))}${r.tipPayouts ? row('Propinas entregadas', '-' + clp(r.tipPayouts)) : ''}
   <div class="r b"><span>Efectivo esperado</span><span>${clp(r.cashEnd)}</span></div>
   ${c.countedCash !== undefined ? row('Efectivo contado', clp(c.countedCash)) + row('Diferencia', clp(c.countedCash - r.cashEnd)) : ''}
