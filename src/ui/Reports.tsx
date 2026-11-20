@@ -186,7 +186,7 @@ function IncomeChart({ r }: { r: PeriodReport }) {
   const nice = niceMax(max);
   const W = 640;
   const H = 220;
-  const L = 52;
+  const L = 84;
   const B = 24;
   const T = 8;
   const plotW = W - L - 8;
@@ -290,4 +290,4 @@ function niceMax(v: number) {
   return [1, 2, 2.5, 5, 10].map((k) => k * p).find((x) => x >= v) ?? v;
 }
 
-const short = (v: number) => (v >= 1e6 ? `${(v / 1e6).toLocaleString('es-CL', { maximumFractionDigits: 1 })} M` : v >= 1e3 ? `${Math.round(v / 1e3)} mil` : String(v));
+const short = (v: number) => clp(v);
