@@ -831,8 +831,14 @@ export function PaySheet({ account, onClose, onDone, correcting }: { account: Ac
   const effective: PayRow[] = split ? rows : rows.slice(0, 1).map((r) => ({ ...r, amount: due }));
   const paid = effective.reduce((a, r) => a + r.amount, 0);
   const left = due - paid;
-  const tips = splitTip(effective.map((r) => r.amount), tip);
-  const ready = effective.length > 0 && left === 0 && effective.every((r) => r.amount > 0) && (!correcting || reason.trim());
+  // Propina de cada medio: exacta si la escriben; si no, repartida según lo que pagó cada medio.
+  const [manualTips, setManualTips] = useState<number[] | null>(() => (correcting && account.payments && account.payments.length > 1 ? account.payments.map((p) => p.tip) : null));
+  const useManual = split && !!manualTips && manualTips.length === effective.length;
+  const tips = useManual ? manualTips! : splitTip(effective.map((r) => r.amount), tip);
+  const tipsSum = tips.reduce((a, b) => a + b, 0);
+  const tipsOk = tipsSum === tip && tips.every((t, i) => t >= 0 && t <= effective[i].amount);
+  const setRowTip = (i: number, v: number) => setManualTips(tips.map((t, j) => (j === i ? v : t)));
+  const ready = effective.length > 0 && left === 0 && tipsOk && effective.every((r) => r.amount > 0) && (!correcting || reason.trim());
   const cashRow = effective.find((r) => r.method === 'efectivo');
   const pick = (m: PayMethod) => setRows([{ method: m, amount: due, received: true }]);
   const setRow = (i: number, patch: Partial<PayRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -922,18 +928,46 @@ export function PaySheet({ account, onClose, onDone, correcting }: { account: Ac
                   placeholder="$0"
                   onChange={(e) => setRow(i, { amount: Number(e.target.value.replace(/\D/g, '') || 0) })}
                 />
-                <span className="pay-tip muted">{tips[i] ? `propina ${clp(tips[i])}` : ''}</span>
+                {tip > 0 && (
+                  <label className="pay-tip">
+                    <span className="muted">propina</span>
+                    <input aria-label={`Propina pagada con ${PAY_LABEL[r.method]}`} inputMode="numeric" value={'$' + (tips[i] ?? 0).toLocaleString('es-CL')} onChange={(e) => setRowTip(i, Number(e.target.value.replace(/\D/g, '') || 0))} />
+                  </label>
+                )}
                 {rows.length > 1 && (
-                  <button className="btn-plain danger small" onClick={() => setRows(rows.filter((_, j) => j !== i))} aria-label="Quitar medio">
+                  <button
+                    className="btn-plain danger small"
+                    onClick={() => {
+                      setRows(rows.filter((_, j) => j !== i));
+                      setManualTips(null);
+                    }}
+                    aria-label="Quitar medio"
+                  >
                     Quitar
                   </button>
                 )}
               </div>
             ))}
-            <button className="btn-plain" onClick={() => setRows([...rows, { method: rows.some((x) => x.method === 'efectivo') ? 'debito' : 'efectivo', amount: Math.max(0, left), received: true }])}>
+            <button
+              className="btn-plain"
+              onClick={() => {
+                setRows([...rows, { method: rows.some((x) => x.method === 'efectivo') ? 'debito' : 'efectivo', amount: Math.max(0, left), received: true }]);
+                setManualTips(null);
+              }}
+            >
               + Agregar otro medio {left > 0 ? `por ${clp(left)}` : ''}
             </button>
             <p className={`hint ${left ? 'warn-text' : ''}`}>{left === 0 ? 'Los pagos cuadran con el total.' : left > 0 ? `Faltan ${clp(left)} por asignar.` : `Los pagos suman ${clp(-left)} de más.`}</p>
+            {tip > 0 && (
+              <p className={`hint ${tipsOk ? '' : 'warn-text'}`}>
+                {tipsOk ? `Propina por medio: escribe el monto exacto que dejó cada uno (incluido en el monto de ese medio).` : tipsSum !== tip ? `Las propinas por medio suman ${clp(tipsSum)} y deben sumar ${clp(tip)}.` : 'La propina de un medio no puede ser mayor que lo que se pagó con él.'}{' '}
+                {useManual && (
+                  <button className="btn-plain small" onClick={() => setManualTips(null)}>
+                    Repartir automático
+                  </button>
+                )}
+              </p>
+            )}
           </div>
         )}
         {effective.some((r) => r.method === 'transferencia') && (

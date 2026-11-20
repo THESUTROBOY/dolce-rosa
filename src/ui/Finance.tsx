@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { addDays, clp, dayKey, fmtDay, weekOf } from '../domain/calc';
-import { bucketOf, finance, shiftReport, tipWeeks } from '../domain/money';
+import { addDays, clp, dayKey, fmtDay, folioLabel, weekOf } from '../domain/calc';
+import { bucketOf, finance, sales, shiftReport, tipNet, tipWeeks } from '../domain/money';
 import { uid } from '../domain/store';
-import type { CashCount, Fund, MovementKind, Reserve, ShiftClose, ShiftReport, TipBucket, Turno } from '../domain/types';
-import { FUND_LABEL, MOVEMENT_LABEL, PAY_LABEL, TIP_BUCKET_LABEL, TURNO_LABEL } from '../domain/types';
+import type { Account, CashCount, Fund, PayMethod, MovementKind, Reserve, ShiftClose, ShiftReport, TipBucket, Turno } from '../domain/types';
+import { FUND_LABEL, MOVEMENT_LABEL, PAY_LABEL, PAY_METHODS, TIP_BUCKET_LABEL, TURNO_LABEL } from '../domain/types';
 import { printHtml, shiftHtml } from '../print';
 import { canPrint, useAction, useAppState, useNow, useStore, useUi } from '../state';
 import { Chips, Empty, Kpi, MoneyField, Segmented, Sheet } from './kit';
-import { ReasonSheet } from './TableView';
+import { PaySheet, ReasonSheet } from './TableView';
 
 const FUNDS = [
   { value: 'efectivo', label: FUND_LABEL.efectivo },
@@ -44,8 +44,10 @@ export function FinanceView() {
         <h2 className="group-title">Compromisos</h2>
         <ul className="list">
           <li className="kv">
-            <span>Propinas pendientes de entregar</span>
-            <span className="muted">no son de la cafetería</span>
+            <span>Propinas de las meseras por entregar</span>
+            <span className="muted">
+              no son de Dolce Rosa · efectivo {clp(f.tipsByMethod.efectivo)} · débito {clp(f.tipsByMethod.debito)}
+            </span>
             <strong>{clp(f.tipsPending)}</strong>
           </li>
           <li className="kv">
@@ -112,11 +114,6 @@ export function FinanceView() {
             <span>Gastos</span>
             <span />
             <strong className="neg">−{clp(f.expenses)}</strong>
-          </li>
-          <li className="kv">
-            <span>Propinas acumuladas</span>
-            <span className="muted">entregadas {clp(f.tipsPaid)}</span>
-            <strong>{clp(f.tipsAccrued)}</strong>
           </li>
           {(f.capital > 0 || f.withdrawals > 0) && (
             <li className="kv">
@@ -504,11 +501,17 @@ export function TipsView() {
   return (
     <div className="admin-pad">
       <div className="kpis">
-        <Kpi lead label="Propinas pendientes de entregar" value={clp(f.tipsPending)} tone="gold" />
-        <Kpi label="Acumuladas" value={clp(f.tipsAccrued)} sub={`efectivo ${clp(f.tipsCash)} · tarjeta y transf. ${clp(f.tipsBank)}`} />
-        <Kpi label="Entregadas" value={clp(f.tipsPaid)} />
+        <Kpi lead label="Propinas por entregar a las meseras" value={clp(f.tipsPending)} tone="gold" sub={`acumuladas ${clp(f.tipsAccrued)} · entregadas ${clp(f.tipsPaid)}`} />
+        <Kpi label="Propinas en efectivo" value={clp(f.tipsByMethod.efectivo)} sub="están en la caja" />
+        <Kpi label="Propinas con débito" value={clp(f.tipsByMethod.debito)} sub="llegan al banco" />
+        {f.tipsByMethod.credito + f.tipsByMethod.transferencia > 0 && (
+          <Kpi label="Crédito y transferencia" value={clp(f.tipsByMethod.credito + f.tipsByMethod.transferencia)} sub={`crédito ${clp(f.tipsByMethod.credito)} · transf. ${clp(f.tipsByMethod.transferencia)}`} />
+        )}
       </div>
-      <p className="hint">Las propinas no son ganancia de la cafetería: no suman a las ventas ni al resultado.{state.settings.tipFeeFromTip ? ' La comisión de la propina pagada con tarjeta se descuenta de la propina.' : ''}</p>
+      <p className="hint">
+        Las propinas son de las meseras, no de Dolce Rosa: no suman a ventas, ingresos, comisiones ni resultado. Montos exactos al peso.
+        {state.settings.tipFeeFromTip ? ' La comisión que cobra Mercado Pago por la propina se descuenta de la propina.' : ''}
+      </p>
 
       <section className="group">
         <h2 className="group-title">Esta semana · {weekLabel(cur.week)}</h2>
@@ -532,7 +535,7 @@ export function TipsView() {
           })}
         </div>
         <ul className="sum-methods">
-          {(Object.keys(cur.byMethod) as (keyof typeof cur.byMethod)[]).map((m) => (
+          {PAY_METHODS.filter((m) => m === 'efectivo' || m === 'debito' || cur.byMethod[m]).map((m) => (
             <li key={m}>
               <span>{PAY_LABEL[m]}</span>
               <span />
@@ -541,6 +544,8 @@ export function TipsView() {
           ))}
         </ul>
       </section>
+
+      <TipsByAccount />
 
       <section className="group">
         <h2 className="group-title">Semanas anteriores</h2>
@@ -614,6 +619,70 @@ export function TipsView() {
   );
 }
 
+const tipLine = (ps: { method: PayMethod; tip: number }[]) =>
+  ps
+    .filter((p) => p.tip)
+    .map((p) => `${PAY_LABEL[p.method]} ${clp(p.tip)}`)
+    .join(' · ');
+
+/** Propina de cada cuenta cobrada en un día, con opción de cambiarla. */
+function TipsByAccount() {
+  const state = useAppState();
+  const [day, setDay] = useState(dayKey(new Date()));
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [all, setAll] = useState(false);
+  const list = sales(state)
+    .filter((x) => x.day === day)
+    .reverse();
+  const totals = PAY_METHODS.map((m) => ({ m, t: list.reduce((a, x) => a + x.payments.filter((p) => p.method === m).reduce((b, p) => b + tipNet(p, state.settings), 0), 0) })).filter((x) => x.t || x.m === 'efectivo' || x.m === 'debito');
+  return (
+    <section className="group">
+      <h2 className="group-title">Propina de cada cuenta</h2>
+      <div className="field-row">
+        <label className="field grow" htmlFor="tips-day">
+          <span>Día</span>
+          <input id="tips-day" type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
+        </label>
+      </div>
+      <ul className="sum-methods">
+        {totals.map(({ m, t }) => (
+          <li key={m}>
+            <span>{PAY_LABEL[m]}</span>
+            <span />
+            <strong>{clp(t)}</strong>
+          </li>
+        ))}
+      </ul>
+      {list.length === 0 ? (
+        <Empty title="Sin cuentas cobradas ese día" />
+      ) : (
+        <ul className="list">
+          {(all ? list : list.slice(0, 6)).map((x) => (
+            <li key={x.account.id} className="kv">
+              <span>
+                {folioLabel(x.account.folio)} · {x.account.tableName} · {TURNO_LABEL[x.turno]} {new Date(x.at).toLocaleTimeString('es-CL', { timeStyle: 'short' })}
+                <small className="block muted">
+                  consumo {clp(x.consumo)} · {x.tip ? `propina ${tipLine(x.payments)}` : 'sin propina'}
+                </small>
+              </span>
+              <button className="btn-plain small" onClick={() => setEditing(x.account)}>
+                Cambiar
+              </button>
+              <strong>{clp(x.tip)}</strong>
+            </li>
+          ))}
+        </ul>
+      )}
+      {list.length > 6 && (
+        <button className="btn-plain" onClick={() => setAll(!all)}>
+          {all ? 'Ver menos' : `Ver las ${list.length} cuentas del día`}
+        </button>
+      )}
+      {editing && <PaySheet account={editing} correcting onClose={() => setEditing(null)} onDone={() => setEditing(null)} />}
+    </section>
+  );
+}
+
 function TipPayoutSheet({ week, bucket, pending, onClose }: { week: string; bucket: TipBucket; pending: number; onClose(): void }) {
   const store = useStore();
   const run = useAction();
@@ -660,15 +729,16 @@ function TipPayoutSheet({ week, bucket, pending, onClose }: { week: string; buck
 // ---------------- Cierres de turno ----------------
 const minus = (n: number) => (n ? `−${clp(n)}` : clp(0));
 export function ShiftReportView({ r, full }: { r: ShiftReport; full: boolean }) {
+  const tipMethods = r.byMethod.filter((m) => m.tip);
+  const tipFees = r.tipFees ?? 0;
   return (
     <div className="shift-report">
       <div className="kpis">
-        <Kpi lead label="Ventas (sin propina)" value={clp(r.consumo)} sub={`${r.sales} ${r.sales === 1 ? 'cuenta' : 'cuentas'}${r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''}`} />
-        <Kpi label="Propinas" value={clp(r.tips)} />
+        <Kpi lead label="Ventas Dolce Rosa (sin propina)" value={clp(r.consumo)} sub={`${r.sales} ${r.sales === 1 ? 'cuenta' : 'cuentas'}${r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''}`} />
         <Kpi label="Comisiones" value={clp(r.fees)} />
         <Kpi label="Ingreso líquido" value={clp(r.net)} tone="gold" />
       </div>
-      <h3 className="mini-title">Medios de pago</h3>
+      <h3 className="mini-title">Medios de pago (ventas sin propina)</h3>
       <ul className="list">
         {r.byMethod
           .filter((m) => m.count)
@@ -677,15 +747,36 @@ export function ShiftReportView({ r, full }: { r: ShiftReport; full: boolean }) 
               <span>
                 {PAY_LABEL[m.method]} <span className="muted">· {m.count}</span>
               </span>
-              <span className="muted">
-                propina {clp(m.tip)}
-                {m.fee ? ` · comisión ${clp(m.fee)}` : ''}
-              </span>
-              <strong>{clp(m.amount)}</strong>
+              <span className="muted">{m.fee ? `comisión ${clp(m.fee)}` : ''}</span>
+              <strong>{clp(m.amount - m.tip)}</strong>
             </li>
           ))}
         {!r.byMethod.some((m) => m.count) && <li className="kv muted">Sin cobros en este turno</li>}
       </ul>
+      <div className="tip-box">
+        <h3 className="mini-title">Propinas de las meseras · no son de Dolce Rosa</h3>
+        <ul className="list">
+          {tipMethods.map((m) => (
+            <li key={m.method} className="kv">
+              <span>{PAY_LABEL[m.method]}</span>
+              <span />
+              <strong>{clp(m.tip)}</strong>
+            </li>
+          ))}
+          {tipFees > 0 && (
+            <li className="kv">
+              <span>Comisión descontada de la propina</span>
+              <span />
+              <strong>{minus(tipFees)}</strong>
+            </li>
+          )}
+          <li className="kv kv-total">
+            <span>Total para las meseras</span>
+            <span />
+            <strong>{clp(r.tips - tipFees)}</strong>
+          </li>
+        </ul>
+      </div>
       <h3 className="mini-title">Caja</h3>
       <ul className="list">
         <li className="kv">
@@ -702,7 +793,7 @@ export function ShiftReportView({ r, full }: { r: ShiftReport; full: boolean }) 
         </li>
         {r.tipPayouts > 0 && (
           <li className="kv">
-            <span>Propinas entregadas</span>
+            <span>Propinas entregadas a las meseras</span>
             <span />
             <strong>{minus(r.tipPayouts)}</strong>
           </li>
@@ -858,7 +949,7 @@ export function ClosesView() {
                         {d !== null && <span className={`pill pill-${diffTone(d)} tag-gap`}>{diffText(d)}</span>}
                       </span>
                       <span className="row-sub">
-                        {c.report.sales} cuentas · propinas {clp(c.report.tips)} · cerró {c.by}
+                        {c.report.sales} cuentas · propinas meseras {clp(c.report.tips - (c.report.tipFees ?? 0))} aparte · cerró {c.by}
                       </span>
                     </span>
                     <span className="row-price">{clp(c.report.consumo)}</span>

@@ -67,7 +67,7 @@ export function periodReport(state: AppState, from: string, to: string): PeriodR
     t.total += s.consumo;
     for (const p of s.payments) {
       const m = methods.get(p.method)!;
-      m.amount += p.amount;
+      m.amount += p.amount - p.tip;
       m.count++;
     }
     for (const l of s.account.lines) {
@@ -99,8 +99,9 @@ export function periodReport(state: AppState, from: string, to: string): PeriodR
   }
   const sum = <T,>(xs: T[], f: (x: T) => number) => xs.reduce((a, x) => a + f(x), 0);
   const income = sum(ss, (s) => s.consumo);
-  const fees = sum(ss, (s) => s.fee);
+  const fees = sum(ss, (s) => s.cafeFee);
   const tips = sum(ss, (s) => s.tip);
+  const tipFees = sum(ss, (s) => s.tipFee);
   // Flujo de caja: lo que entra y sale de verdad por los fondos.
   const loansIn = sum(
     state.movements.filter((m) => !m.voided && inRange(m.date) && (m.kind === 'prestamo_recibido' || m.kind === 'cobro_prestamo')),
@@ -131,11 +132,12 @@ export function periodReport(state: AppState, from: string, to: string): PeriodR
     (e) => e.amount,
   );
   const cashFlow = [
-    { label: 'Cobros de ventas (con propina, sin comisión)', amount: income + tips - fees },
+    { label: 'Cobros de ventas (sin propina, sin comisión)', amount: income - fees },
+    { label: 'Propinas cobradas (de las meseras)', amount: tips - tipFees },
     { label: 'Préstamos recibidos y devueltos', amount: loansIn },
     { label: 'Aportes de capital', amount: capital },
     { label: 'Gastos pagados', amount: -appExpenses },
-    { label: 'Propinas entregadas', amount: -tipsPaid },
+    { label: 'Propinas entregadas a las meseras', amount: -tipsPaid },
     { label: 'Préstamos entregados y pagados', amount: -loansOut },
     { label: 'Retiros de socios', amount: -withdrawals },
     { label: 'Ajustes por cuadratura', amount: adjustments },

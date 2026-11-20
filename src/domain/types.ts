@@ -95,6 +95,8 @@ export interface Payment {
   tip: number;
   /** Comisión del medio de pago (Mercado Pago) sobre `amount`. */
   fee: number;
+  /** Parte exacta de `fee` que corresponde a la propina (fee − comisión sobre el consumo). */
+  tipFee?: number;
   /** Día en que el abono llega a la cuenta bancaria (tarjetas). */
   settleOn?: string;
   /** Transferencias: si ya se vio en la cuenta. */
@@ -350,9 +352,14 @@ export interface ShiftReport {
   subtotal: number;
   discounts: number;
   consumo: number;
+  /** Propinas cobradas (de las meseras, no de la cafetería). */
   tips: number;
+  /** Comisión que se descuenta de las propinas (si está activado). */
+  tipFees?: number;
+  /** Comisiones que paga la cafetería (sin la parte de la propina). */
   fees: number;
   net: number;
+  /** amount incluye la propina; amount − tip = venta de la cafetería. */
   byMethod: { method: PayMethod; count: number; amount: number; tip: number; fee: number }[];
   expenses: { fund: Fund; amount: number; count: number }[];
   tipPayouts: number;

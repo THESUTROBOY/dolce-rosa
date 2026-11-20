@@ -42,7 +42,7 @@ export function ledgerRows(state: AppState, from: string, to: string): LedgerRow
       d.income[p.method] += p.amount - p.tip;
       d.tips[p.method] += p.tip;
     }
-    d.fees += s.fee;
+    d.fees += s.cafeFee;
     if (s.account.folio) d.folios.push(s.account.folio);
   }
   for (const [day, d] of [...byDay].sort((a, b) => a[0].localeCompare(b[0]))) {

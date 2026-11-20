@@ -27,7 +27,7 @@ export function Reports() {
         <Kpi label="Cuentas" value={r.sales} sub={<Delta cur={r.sales} prev={p.sales} />} />
         <Kpi label="Productos vendidos" value={r.units.toLocaleString('es-CL')} sub={<Delta cur={r.units} prev={p.units} />} />
       </div>
-      <p className="hint">Comparado con {periodLabel(prevP)}. Las propinas ({clp(r.tips)}) no son ventas y no están en estos totales.</p>
+      <p className="hint">Comparado con {periodLabel(prevP)}. Las propinas ({clp(r.tips)}) son de las meseras, no de Dolce Rosa: no están en ventas, comisiones ni resultado.</p>
 
       <section className="group">
         <h2 className="group-title">Evolución de ingresos y gastos</h2>
@@ -106,7 +106,7 @@ export function Reports() {
           </div>
         </section>
         <section className="group">
-          <h2 className="group-title">Medios de pago y turnos</h2>
+          <h2 className="group-title">Medios de pago y turnos (sin propina)</h2>
           <ul className="list">
             {r.byMethod.map((m) => (
               <li key={m.method} className="kv">

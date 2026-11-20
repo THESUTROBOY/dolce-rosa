@@ -9,6 +9,8 @@ export const feeFor = (method: PayMethod, amount: number, s: Settings) => Math.r
 /** Arma un pago con su comisión y la fecha en que llega el abono. */
 export function makePayment(method: PayMethod, amount: number, tip: number, day: string, s: Settings, received = true): Payment {
   const p: Payment = { method, amount: Math.round(amount), tip: Math.round(tip), fee: feeFor(method, amount, s) };
+  // Comisión de la propina exacta: total menos la comisión que habría tenido solo el consumo.
+  if (p.tip && p.fee) p.tipFee = p.fee - feeFor(method, p.amount - p.tip, s);
   if (method === 'debito' || method === 'credito') p.settleOn = addDays(day, s.settleDays?.[method] ?? 0);
   if (method === 'transferencia') p.received = received;
   return p;
@@ -37,6 +39,11 @@ export function paymentsOf(a: Account): Payment[] {
   return [{ method, amount: accountTotal(a) + a.tip, tip: a.tip, fee: 0, settleOn: a.payDay ?? a.day, received: true }];
 }
 
+/** Parte de la comisión que corresponde a la propina de un pago. */
+export const tipFeeOf = (p: Payment) => p.tipFee ?? (p.amount && p.tip ? Math.round((p.fee * p.tip) / p.amount) : 0);
+/** Propina que les corresponde a las meseras por un pago (descontando su comisión si así está configurado). */
+export const tipNet = (p: Payment, s: Settings) => p.tip - (s.tipFeeFromTip ? tipFeeOf(p) : 0);
+
 export const methodsLabel = (ps: Payment[]) => [...new Set(ps.map((p) => PAY_LABEL[p.method]))].join(' + ');
 
 // ---------------- Ventas ----------------
@@ -55,6 +62,8 @@ export interface Sale {
   fee: number;
   /** Parte de la comisión que se descuenta de la propina. */
   tipFee: number;
+  /** Comisión que paga la cafetería (fee − tipFee). */
+  cafeFee: number;
   /** Ingreso líquido para la cafetería: consumo menos la comisión que le toca. */
   net: number;
   payments: Payment[];
@@ -68,7 +77,7 @@ export function sales(state: AppState): Sale[] {
     .map((a) => {
       const payments = paymentsOf(a);
       const fee = payments.reduce((x, p) => x + p.fee, 0);
-      const tipFee = s.tipFeeFromTip ? payments.reduce((x, p) => x + (p.amount ? Math.round((p.fee * p.tip) / p.amount) : 0), 0) : 0;
+      const tipFee = s.tipFeeFromTip ? payments.reduce((x, p) => x + tipFeeOf(p), 0) : 0;
       const consumo = accountTotal(a);
       return {
         account: a,
@@ -81,6 +90,7 @@ export function sales(state: AppState): Sale[] {
         tip: a.tip,
         fee,
         tipFee,
+        cafeFee: fee - tipFee,
         net: consumo - (fee - tipFee),
         payments,
       };
@@ -131,6 +141,8 @@ export interface Finance {
   tipsPending: number;
   tipsCash: number;
   tipsBank: number;
+  /** Propinas de las meseras por medio de pago (netas de comisión si corresponde). */
+  tipsByMethod: Record<PayMethod, number>;
   lentOut: number;
   borrowed: number;
   capital: number;
@@ -164,6 +176,7 @@ export function finance(state: AppState, until: Date = new Date()): Finance {
     tipsPending: 0,
     tipsCash: 0,
     tipsBank: 0,
+    tipsByMethod: { efectivo: 0, debito: 0, credito: 0, transferencia: 0 },
     lentOut: 0,
     borrowed: 0,
     capital: 0,
@@ -176,22 +189,24 @@ export function finance(state: AppState, until: Date = new Date()): Finance {
   for (const sale of sales(state)) {
     if (sale.day < from || new Date(sale.at).getTime() > t) continue;
     f.income += sale.consumo;
-    f.fees += sale.fee;
+    f.fees += sale.cafeFee;
     f.tipsAccrued += sale.tip - sale.tipFee;
     for (const p of sale.payments) {
       const net = p.amount - p.fee;
+      const tn = tipNet(p, state.settings);
+      f.tipsByMethod[p.method] += tn;
       if (p.method === 'efectivo') {
         f.cash += p.amount;
-        f.tipsCash += p.tip;
+        f.tipsCash += tn;
       } else if (p.method === 'transferencia') {
         const got = p.received !== false && (!p.receivedAt || new Date(p.receivedAt).getTime() <= t);
         if (got) f.bank += net;
         else f.pendingTransfers += net;
-        f.tipsBank += p.tip;
+        f.tipsBank += tn;
       } else {
         if ((p.settleOn ?? sale.day) <= untilDay) f.bank += net;
         else f.pendingMp += net;
-        f.tipsBank += p.tip;
+        f.tipsBank += tn;
       }
     }
   }
@@ -252,7 +267,7 @@ export function tipWeeks(state: AppState): TipWeek[] {
     if (!sale.tip) continue;
     const w = get(weekOf(sale.day));
     w.accrued[bucketOf(sale.day)] += sale.tip - sale.tipFee;
-    for (const p of sale.payments) w.byMethod[p.method] += p.tip;
+    for (const p of sale.payments) w.byMethod[p.method] += tipNet(p, state.settings);
   }
   for (const p of state.tipPayouts) {
     if (p.voided) continue;
@@ -301,7 +316,8 @@ export function shiftReport(state: AppState, day: string, turno: Turno, now = ne
     discounts: ss.reduce((a, x) => a + x.discount, 0),
     consumo: ss.reduce((a, x) => a + x.consumo, 0),
     tips: ss.reduce((a, x) => a + x.tip, 0),
-    fees: ss.reduce((a, x) => a + x.fee, 0),
+    tipFees: ss.reduce((a, x) => a + x.tipFee, 0),
+    fees: ss.reduce((a, x) => a + x.cafeFee, 0),
     net: ss.reduce((a, x) => a + x.net, 0),
     byMethod,
     expenses: (['efectivo', 'banco'] as Fund[]).map((fund) => {

@@ -76,17 +76,20 @@ export function Accounts() {
 
       <div className="summary">
         <div className="sum-main">
-          <span>Total emitido</span>
-          <strong>{clp(sum.total + sum.tips)}</strong>
+          <span>Ventas Dolce Rosa (sin propina)</span>
+          <strong>{clp(sum.total)}</strong>
           <small>
-            {sum.count} {sum.count === 1 ? 'cuenta' : 'cuentas'} · consumo {clp(sum.total)} · propinas {clp(sum.tips)}
+            {sum.count} {sum.count === 1 ? 'cuenta' : 'cuentas'} · propinas de las meseras aparte: {clp(sum.tips)}
           </small>
         </div>
         <ul className="sum-methods" aria-label="Por medio de pago">
           {sum.byMethod.map((m) => (
             <li key={m.method}>
               <span>{m.method}</span>
-              <span className="muted">{m.count}</span>
+              <span className="muted">
+                {m.count}
+                {m.tip ? ` · + propina ${clp(m.tip)}` : ''}
+              </span>
               <strong>{clp(m.amount)}</strong>
             </li>
           ))}

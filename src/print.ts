@@ -73,12 +73,18 @@ export function shiftHtml(c: ShiftClose, business: string) {
   const row = (a: string, b: string) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
   return `<style>${PAGE}</style><h1>${esc(business)}</h1><div class="c"><b>CIERRE DE TURNO ${TURNO_LABEL[c.turno]}</b></div>
   <div class="c s">${fmtDay(c.day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="c s">Cerró ${esc(c.by)} · ${when(c.closedAt)}</div><hr>
-  ${row('Cuentas', String(r.sales))}${r.discounts ? row('Descuentos', clp(r.discounts)) : ''}${row('Ventas sin propina', clp(r.consumo))}${row('Propinas', clp(r.tips))}${row('Comisiones', clp(r.fees))}
+  ${row('Cuentas', String(r.sales))}${r.discounts ? row('Descuentos', clp(r.discounts)) : ''}${row('Ventas sin propina', clp(r.consumo))}${row('Comisiones', clp(r.fees))}
   <div class="r b"><span>Ingreso líquido</span><span>${clp(r.net)}</span></div><hr>
   ${r.byMethod
     .filter((m) => m.count)
-    .map((m) => row(`${PAY_LABEL[m.method]} (${m.count})`, clp(m.amount)) + (m.tip ? `<div class="n">propina ${clp(m.tip)}</div>` : ''))
+    .map((m) => row(`${PAY_LABEL[m.method]} (${m.count})`, clp(m.amount - m.tip)))
     .join('')}<hr>
+  <div class="c"><b>PROPINAS MESERAS</b></div>
+  ${r.byMethod
+    .filter((m) => m.tip)
+    .map((m) => row(PAY_LABEL[m.method], clp(m.tip)))
+    .join('')}${r.tipFees ? row('Comisión propina', '-' + clp(r.tipFees)) : ''}
+  <div class="r b"><span>Total meseras</span><span>${clp(r.tips - (r.tipFees ?? 0))}</span></div><hr>
   ${row('Efectivo inicio', clp(r.cashStart))}${row('Gastos caja', '-' + clp(r.expenses[0].amount))}${row('Gastos banco', '-' + clp(r.expenses[1].amount))}${r.tipPayouts ? row('Propinas entregadas', '-' + clp(r.tipPayouts)) : ''}
   <div class="r b"><span>Efectivo esperado</span><span>${clp(r.cashEnd)}</span></div>
   ${c.countedCash !== undefined ? row('Efectivo contado', clp(c.countedCash)) + row('Diferencia', clp(c.countedCash - r.cashEnd)) : ''}

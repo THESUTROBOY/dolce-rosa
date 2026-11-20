@@ -92,7 +92,8 @@ export interface Summary {
   iva: number;
   tips: number;
   avg: number;
-  byMethod: { method: string; amount: number; count: number }[];
+  /** Montos sin propina; la propina de cada medio va aparte. */
+  byMethod: { method: string; amount: number; tip: number; count: number }[];
   byTurno: { turno: Turno; count: number; total: number }[];
   byStation: { station: string; qty: number; total: number }[];
   products: { name: string; qty: number; total: number }[];
@@ -108,16 +109,21 @@ export function summarize(state: AppState, from: string, to: string, turno?: Tur
   const emitted = state.accounts.filter((a) => a.status === 'emitida' && inRange(a));
   const voided = state.accounts.filter((a) => a.status === 'anulada' && inRange(a)).length;
   const total = emitted.reduce((s, a) => s + accountTotal(a), 0);
-  const methods = new Map<string, { amount: number; count: number }>();
+  const methods = new Map<string, { amount: number; tip: number; count: number }>();
   const turnos = new Map<Turno, { count: number; total: number }>();
   const stations = new Map<string, { qty: number; total: number }>();
   const prods = new Map<string, { name: string; qty: number; total: number }>();
   const days = new Map<string, { total: number; count: number }>();
   for (const a of emitted) {
-    const parts = !a.paidAt ? [{ m: 'Por cobrar', amount: accountDue(a) }] : a.payments?.length ? a.payments.map((p) => ({ m: PAY_LABEL[p.method], amount: p.amount })) : [{ m: a.paymentMethod ?? 'Sin indicar', amount: accountDue(a) }];
-    for (const { m, amount } of parts) {
-      const mm = methods.get(m) ?? { amount: 0, count: 0 };
+    const parts = !a.paidAt
+      ? [{ m: 'Por cobrar', amount: accountTotal(a), tip: 0 }]
+      : a.payments?.length
+        ? a.payments.map((p) => ({ m: PAY_LABEL[p.method], amount: p.amount - p.tip, tip: p.tip }))
+        : [{ m: a.paymentMethod ?? 'Sin indicar', amount: accountTotal(a), tip: a.tip }];
+    for (const { m, amount, tip } of parts) {
+      const mm = methods.get(m) ?? { amount: 0, tip: 0, count: 0 };
       mm.amount += amount;
+      mm.tip += tip;
       mm.count++;
       methods.set(m, mm);
     }

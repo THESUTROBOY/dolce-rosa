@@ -77,8 +77,27 @@ describe('cobro', () => {
     s.pay(a.id, { tip: 329, paymentMethod: 'credito' });
     const [sale] = sales(s.get());
     expect(sale.fee).toBe(Math.round(3619 * 0.034));
-    expect(sale.tipFee).toBe(Math.round((sale.fee * 329) / 3619));
-    expect(sale.net).toBe(3290 - (sale.fee - sale.tipFee));
+    // Exacto: comisión total menos la comisión que habría tenido solo el consumo.
+    expect(sale.tipFee).toBe(sale.fee - Math.round(3290 * 0.034));
+    expect(sale.cafeFee).toBe(Math.round(3290 * 0.034));
+    expect(sale.net).toBe(3290 - sale.cafeFee);
+    const f = finance(s.get());
+    expect(f.fees).toBe(sale.cafeFee);
+    expect(f.tipsByMethod.credito).toBe(329 - sale.tipFee);
+  });
+
+  it('propina exacta por medio en pago combinado, separada por efectivo y débito', () => {
+    const { s, emitted } = setup();
+    const a = emitted(['Latte']);
+    // Consumo 3290, propina 329: el efectivo dejó 300 y el débito 29.
+    s.pay(a.id, { tip: 329, payments: [{ method: 'efectivo', amount: 2000, tip: 300 }, { method: 'debito', amount: 1619, tip: 29 }] });
+    const f = finance(s.get());
+    expect(f.tipsByMethod).toMatchObject({ efectivo: 300, debito: 29 });
+    expect(f.income).toBe(3290);
+    expect(() => {
+      const b = emitted(['Latte']);
+      s.pay(b.id, { tip: 329, payments: [{ method: 'efectivo', amount: 2000, tip: 300 }, { method: 'debito', amount: 1619, tip: 20 }] });
+    }).toThrow();
   });
 
   it('transferencias pendientes hasta marcarlas recibidas', () => {

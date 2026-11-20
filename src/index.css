@@ -2317,11 +2317,29 @@ button:disabled {
 }
 .pay-tip {
   grid-column: 1 / 3;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
-  margin-top: -4px;
+  margin-top: -2px;
 }
-.pay-tip:empty {
-  display: none;
+.pay-tip input {
+  flex: 1;
+  min-height: 40px;
+}
+.pay-row + .pay-row {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.tip-box {
+  margin-top: 12px;
+  padding: 4px 12px 8px;
+  border-radius: 16px;
+  background: var(--gold-soft);
+}
+.tip-box .list {
+  background: transparent;
 }
 .inline-toggle {
   margin-left: auto;
