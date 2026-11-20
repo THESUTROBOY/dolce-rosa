@@ -1,3 +1,4 @@
+import { DEFAULT_FEES, DEFAULT_SETTLE_DAYS, DOC_TYPES, EXPENSE_CATEGORIES, EXPENSE_METHODS } from './defaults';
 import type { AppState, Category, ChoiceGroup, Option, Product } from './types';
 
 /** Carta oficial de Dolce Rosa (PDF de mayo 2026) y configuración inicial. */
@@ -124,7 +125,7 @@ export function seedState(): AppState {
     p(salados.id, 'Selladito', 2990, { description: 'Pan de miga, jamón y queso' }),
   ];
   return {
-    version: 2,
+    version: 3,
     categories: cats,
     products,
     tables: [
@@ -139,12 +140,28 @@ export function seedState(): AppState {
       phone: '',
       footer: 'Detalle de cuenta. No es boleta. La propina es voluntaria.',
       tipPercent: 10,
-      paymentMethods: ['Efectivo', 'Débito', 'Crédito', 'Transferencia'],
+      fees: { ...DEFAULT_FEES },
+      settleDays: { ...DEFAULT_SETTLE_DAYS },
+      openingCash: 0,
+      openingBank: 0,
+      openingDate: '',
+      expenseCategories: [...EXPENSE_CATEGORIES],
+      expenseMethods: [...EXPENSE_METHODS],
+      docTypes: [...DOC_TYPES],
       afternoonStartsAt: 15,
       adminPin: '1234',
       printOnEmit: true,
       iceCreamFlavors: ['Vainilla', 'Chocolate', 'Frutilla', 'Lúcuma', 'Manjar', 'Menta chip'],
     },
+    promotions: [],
+    staff: [{ id: 'staff_admin', name: 'Administración', role: 'admin', pin: '1234', active: true }],
+    expenses: [],
+    movements: [],
+    tipPayouts: [],
+    reserves: [],
+    counts: [],
+    closes: [],
+    ledgerHistory: [],
     audit: [],
     nextAccount: 1,
     nextComanda: 1,

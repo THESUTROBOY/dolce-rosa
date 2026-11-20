@@ -1,6 +1,31 @@
-import { dayKey, folioLabel, occupiesTable, scoopsFor, turnoOf } from './calc';
+import { accountTotal, clp, dayKey, folioLabel, occupiesTable, scoopsFor, turnoOf } from './calc';
+import { DEFAULT_FEES, DEFAULT_SETTLE_DAYS, DOC_TYPES, EXPENSE_CATEGORIES, EXPENSE_METHODS } from './defaults';
+import { makePayment, methodsLabel, shiftReport, splitTip } from './money';
 import { seedState } from './seed';
-import type { Account, AppState, Category, Comanda, ComandaStatus, Line, Product, Settings, Station, TableDef } from './types';
+import type {
+  Account,
+  AppliedDiscount,
+  AppState,
+  CashCount,
+  Category,
+  Comanda,
+  ComandaStatus,
+  Expense,
+  LedgerRow,
+  Line,
+  Movement,
+  PayMethod,
+  Product,
+  Promotion,
+  Reserve,
+  Settings,
+  Staff,
+  Station,
+  TableDef,
+  TipPayout,
+  Turno,
+} from './types';
+import { FUND_LABEL, MOVEMENT_LABEL, PAY_METHODS, TIP_BUCKET_LABEL } from './types';
 
 export interface Persistence {
   load(): AppState | null;
@@ -9,20 +34,44 @@ export interface Persistence {
   watch?(fn: (s: AppState) => void): void;
 }
 
-/** Respaldos anteriores al ID de detalle: continúa la numeración desde el mayor existente. */
-function withFolio(s: AppState): AppState {
+/**
+ * Pone al día datos guardados con versiones anteriores:
+ * ID de detalle (v2), pagos registrados al emitir, y finanzas, gastos y perfiles (v3).
+ */
+export function migrate(raw: unknown): AppState | null {
+  const s = raw as Omit<AppState, 'version'> & { version: number };
+  if (!s || (s.version !== 2 && s.version !== 3) || !Array.isArray(s.accounts)) return null;
   if (!s.nextFolio) s.nextFolio = Math.max(0, ...s.accounts.map((a) => a.folio ?? 0)) + 1;
   // Antes el pago se registraba al emitir: esas cuentas ya están pagadas y no deben ocupar la mesa.
   for (const a of s.accounts) if (a.status === 'emitida' && !a.paidAt && a.paymentMethod) a.paidAt = a.emittedAt;
-  return s;
+  s.version = 3;
+  s.promotions ??= [];
+  s.expenses ??= [];
+  s.movements ??= [];
+  s.tipPayouts ??= [];
+  s.reserves ??= [];
+  s.counts ??= [];
+  s.closes ??= [];
+  s.ledgerHistory ??= [];
+  s.staff ??= [{ id: 'staff_admin', name: 'Administración', role: 'admin', pin: s.settings.adminPin || '1234', active: true }];
+  const st = s.settings;
+  st.fees ??= { ...DEFAULT_FEES };
+  st.settleDays ??= { ...DEFAULT_SETTLE_DAYS };
+  st.openingCash ??= 0;
+  st.openingBank ??= 0;
+  st.openingDate ??= '';
+  st.expenseCategories ??= [...EXPENSE_CATEGORIES];
+  st.expenseMethods ??= [...EXPENSE_METHODS];
+  st.docTypes ??= [...DOC_TYPES];
+  return s as AppState;
 }
+const withFolio = (s: AppState) => migrate(s)!;
 
 export const localPersistence = (key: string): Persistence => ({
   load() {
     try {
       const raw = localStorage.getItem(key);
-      const s = raw ? (JSON.parse(raw) as AppState) : null;
-      return s?.version === 2 ? withFolio(s) : null;
+      return raw ? migrate(JSON.parse(raw)) : null;
     } catch {
       return null;
     }
@@ -38,7 +87,8 @@ export const localPersistence = (key: string): Persistence => ({
     window.addEventListener('storage', (e) => {
       if (e.key !== key || !e.newValue) return;
       try {
-        fn(JSON.parse(e.newValue) as AppState);
+        const s = migrate(JSON.parse(e.newValue));
+        if (s) fn(s);
       } catch {
         /* ignora datos corruptos */
       }
@@ -48,12 +98,20 @@ export const localPersistence = (key: string): Persistence => ({
 
 export const memoryPersistence = (initial?: AppState): Persistence => {
   let s: AppState | null = initial ? structuredClone(initial) : null;
-  return { load: () => (s ? withFolio(s) : null), save: (x) => (s = structuredClone(x)) };
+  return { load: () => (s ? withFolio(structuredClone(s)) : null), save: (x) => (s = structuredClone(x)) };
 };
 
 export class DomainError extends Error {}
 
 export const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+export interface PayInput {
+  tip: number;
+  /** Atajo: un solo medio por el total. */
+  paymentMethod?: PayMethod;
+  payments?: { method: PayMethod; amount: number; tip?: number; received?: boolean }[];
+  boleta?: string;
+}
 
 export interface NewLine {
   productId: string;
@@ -73,10 +131,12 @@ export class Store {
   private persistence: Persistence;
   /** Reloj inyectable para pruebas. */
   now: () => Date = () => new Date();
+  /** Quién está usando este equipo: queda en el registro de cambios. */
+  actor = 'Sin nombre';
 
   constructor(persistence: Persistence, initial: () => AppState = seedState) {
     this.persistence = persistence;
-    this.state = persistence.load() ?? initial();
+    this.state = persistence.load() ?? migrate(initial())!;
     persistence.save(this.state);
     persistence.watch?.((s) => {
       this.state = s;
@@ -93,17 +153,32 @@ export class Store {
 
   private iso = () => this.now().toISOString();
 
+  /** Avisos de cambios hechos en este equipo (para sincronizar). */
+  private changeListeners = new Set<(s: AppState) => void>();
+  onLocalChange = (fn: (s: AppState) => void) => {
+    this.changeListeners.add(fn);
+    return () => this.changeListeners.delete(fn);
+  };
+
   private commit(mut: (d: AppState) => void) {
     const d = structuredClone(this.state);
     mut(d);
     this.state = d;
     this.persistence.save(d);
     this.listeners.forEach((l) => l());
+    this.changeListeners.forEach((l) => l(d));
+  }
+
+  /** Datos que llegan de otro equipo: se guardan y se muestran, sin volver a enviarlos. */
+  applyRemote(next: AppState) {
+    this.state = next;
+    this.persistence.save(next);
+    this.listeners.forEach((l) => l());
   }
 
   private log(d: AppState, action: string, detail: string) {
-    d.audit.push({ id: uid('log'), action, detail, at: this.iso() });
-    if (d.audit.length > 2000) d.audit.splice(0, d.audit.length - 2000);
+    d.audit.push({ id: uid('log'), action, detail, at: this.iso(), by: this.actor });
+    if (d.audit.length > 5000) d.audit.splice(0, d.audit.length - 5000);
   }
 
   // ---------- Consultas ----------
@@ -122,8 +197,12 @@ export class Store {
     return { day: dayKey(n), turno: turnoOf(n, this.state.settings.afternoonStartsAt) };
   }
 
-  checkPin(pin: string) {
-    return pin === this.state.settings.adminPin;
+  /** Devuelve la persona de administración dueña del PIN. */
+  checkPin(pin: string): Staff | undefined {
+    const admin = this.state.staff.find((p) => p.role === 'admin' && p.active && p.pin === pin);
+    if (admin) return admin;
+    if (pin === this.state.settings.adminPin) return { id: 'staff_admin', name: 'Administración', role: 'admin', pin, active: true };
+    return undefined;
   }
 
   // ---------- Mesas y cuentas ----------
@@ -132,12 +211,13 @@ export class Store {
     if (!table) throw new DomainError('Mesa no encontrada');
     const p = this.state.products.find((x) => x.id === l.productId);
     if (!p || p.archived) throw new DomainError('Producto no disponible');
-    if (p.soldOut) throw new DomainError(`${p.name} está agotado`);
+    if (p.soldOut) throw new DomainError(`${p.name} no está disponible`);
     if (!(l.qty >= 1)) throw new DomainError('Cantidad inválida');
     const variant = l.variant ? p.variants.find((v) => v.name === l.variant) : undefined;
     if (p.variants.length && !variant) throw new DomainError('Elige una opción');
+    const catExtras = this.state.categories.find((c) => c.id === p.categoryId)?.extras ?? [];
     const extrasPrice = l.extras.reduce((s, e) => {
-      const x = p.extras.find((y) => y.name === e);
+      const x = p.extras.find((y) => y.name === e) ?? catExtras.find((y) => y.name === e);
       if (!x) throw new DomainError(`Extra no válido: ${e}`);
       return s + x.price;
     }, 0);
@@ -317,6 +397,7 @@ export class Store {
       // Si se reabrió para agregar algo, conserva su ID.
       acc.folio ??= d.nextFolio++;
       acc.emittedAt = this.iso();
+      acc.emittedBy = this.actor;
       acc.day = day;
       acc.turno = turno;
       // Lo que quedaba listo en cocina o barra se da por entregado.
@@ -329,20 +410,121 @@ export class Store {
     });
   }
 
-  /** Registra el pago de un detalle emitido y libera la mesa. */
-  pay(accountId: string, opts: { tip: number; paymentMethod: string; boleta?: string }) {
+  /**
+   * Registra el pago de un detalle emitido y libera la mesa.
+   * Admite pagos combinados: la suma debe ser consumo + propina.
+   */
+  pay(accountId: string, opts: PayInput) {
     const a = this.state.accounts.find((x) => x.id === accountId);
     if (!a || a.status !== 'emitida') throw new DomainError('Primero emite el detalle de cuenta');
     if (a.paidAt) throw new DomainError('Este detalle ya está pagado');
-    if (!(opts.tip >= 0)) throw new DomainError('Propina inválida');
-    if (!opts.paymentMethod) throw new DomainError('Elige el medio de pago');
+    const { day, turno } = this.currentTurno();
+    const payments = this.buildPayments(a, opts, day);
     this.commit((d) => {
       const acc = d.accounts.find((x) => x.id === accountId)!;
-      acc.paidAt = this.iso();
-      acc.tip = Math.round(opts.tip);
-      acc.paymentMethod = opts.paymentMethod;
-      acc.boleta = opts.boleta?.trim() || undefined;
+      this.applyPayment(acc, payments, opts.boleta, day, turno);
     });
+  }
+
+  /** Corrige el pago de una cuenta ya cobrada (solo administración, queda registrado). */
+  correctPayment(isAdmin: boolean, accountId: string, opts: PayInput, reason: string) {
+    this.admin(isAdmin);
+    if (!reason.trim()) throw new DomainError('Indica el motivo');
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || a.status !== 'emitida' || !a.paidAt) throw new DomainError('La cuenta no está cobrada');
+    const payments = this.buildPayments(a, opts, a.payDay ?? a.day!);
+    this.commit((d) => {
+      const acc = d.accounts.find((x) => x.id === accountId)!;
+      const before = `${acc.paymentMethod} ${clp(accountTotal(acc) + acc.tip)} (propina ${clp(acc.tip)})`;
+      acc.payments = payments;
+      acc.tip = payments.reduce((x, p) => x + p.tip, 0);
+      acc.paymentMethod = methodsLabel(payments);
+      if (opts.boleta !== undefined) acc.boleta = opts.boleta.trim() || undefined;
+      this.log(d, 'Corregir pago', `Detalle ${folioLabel(acc.folio)}: ${before} → ${acc.paymentMethod} ${clp(accountTotal(acc) + acc.tip)} (propina ${clp(acc.tip)}). ${reason}`);
+    });
+  }
+
+  private buildPayments(a: Account, opts: PayInput, day: string) {
+    const tip = Math.round(opts.tip);
+    if (!(tip >= 0)) throw new DomainError('Propina inválida');
+    const consumo = accountTotal(a);
+    const rows = opts.payments?.length ? opts.payments : opts.paymentMethod ? [{ method: opts.paymentMethod, amount: consumo + tip }] : [];
+    if (!rows.length) throw new DomainError('Elige el medio de pago');
+    if (rows.some((r) => !PAY_METHODS.includes(r.method))) throw new DomainError('Medio de pago no válido');
+    if (rows.some((r) => !(r.amount > 0))) throw new DomainError('Cada medio de pago necesita un monto');
+    const sum = rows.reduce((x, r) => x + Math.round(r.amount), 0);
+    if (sum !== consumo + tip) throw new DomainError(`Los pagos suman ${clp(sum)} y deben sumar ${clp(consumo + tip)}`);
+    const tips = rows.every((r) => r.tip !== undefined) ? rows.map((r) => Math.round(r.tip!)) : splitTip(rows.map((r) => r.amount), tip);
+    if (tips.reduce((x, y) => x + y, 0) !== tip || tips.some((t, i) => t < 0 || t > rows[i].amount)) throw new DomainError('Revisa cómo se reparte la propina');
+    return rows.map((r, i) => makePayment(r.method, r.amount, tips[i], day, this.state.settings, r.received ?? true));
+  }
+
+  private applyPayment(acc: Account, payments: ReturnType<typeof makePayment>[], boleta: string | undefined, day: string, turno: Turno) {
+    acc.paidAt = this.iso();
+    acc.payDay = day;
+    acc.payTurno = turno;
+    acc.paidBy = this.actor;
+    acc.payments = payments;
+    acc.tip = payments.reduce((x, p) => x + p.tip, 0);
+    acc.paymentMethod = methodsLabel(payments);
+    acc.boleta = boleta?.trim() || undefined;
+  }
+
+  /** Marca una transferencia como recibida (o no) en la cuenta bancaria. */
+  setTransferReceived(isAdmin: boolean, accountId: string, index: number, received: boolean) {
+    this.admin(isAdmin);
+    this.commit((d) => {
+      const p = d.accounts.find((x) => x.id === accountId)?.payments?.[index];
+      if (!p || p.method !== 'transferencia') return;
+      p.received = received;
+      p.receivedAt = received ? this.iso() : undefined;
+    });
+  }
+
+  // ---------- Descuentos ----------
+  /** Aplica una promoción (cualquiera) o un descuento manual (solo administración). */
+  applyDiscount(isAdmin: boolean, accountId: string, d: Omit<AppliedDiscount, 'id' | 'by'>) {
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (!a || !(a.status === 'abierta' || (a.status === 'emitida' && !a.paidAt))) throw new DomainError('Solo se aplican descuentos antes de cobrar');
+    if (!d.promoId && !isAdmin) throw new DomainError('Los descuentos manuales los hace administración');
+    if (d.promoId) {
+      const promo = this.state.promotions.find((p) => p.id === d.promoId);
+      if (!promo || !promo.active) throw new DomainError('La promoción no está activa');
+      if (a.discounts?.some((x) => x.promoId === d.promoId)) throw new DomainError('Esa promoción ya está aplicada');
+    }
+    if (!(d.value > 0) || (d.kind === 'percent' && d.value > 100)) throw new DomainError('Revisa el valor del descuento');
+    if (!d.name.trim()) throw new DomainError('El descuento necesita un nombre');
+    this.commit((st) => {
+      const acc = st.accounts.find((x) => x.id === accountId)!;
+      acc.discounts = [...(acc.discounts ?? []), { ...d, name: d.name.trim(), id: uid('dto'), by: this.actor }];
+      this.log(st, 'Aplicar descuento', `${acc.tableName} cuenta ${acc.number}: ${d.name} (${d.kind === 'percent' ? `${d.value}%` : clp(d.value)})`);
+    });
+  }
+
+  /** Aplica una promoción de la lista, con sus productos y categorías ya resueltos. */
+  applyPromotion(accountId: string, promoId: string) {
+    const p = this.state.promotions.find((x) => x.id === promoId);
+    if (!p) throw new DomainError('Promoción no encontrada');
+    const ids = [...new Set([...p.productIds, ...this.state.products.filter((x) => p.categoryIds.includes(x.categoryId)).map((x) => x.id)])];
+    const a = this.state.accounts.find((x) => x.id === accountId);
+    if (ids.length && a && !a.lines.some((l) => ids.includes(l.productId))) throw new DomainError('La cuenta no tiene productos de esta promoción');
+    this.applyDiscount(false, accountId, { promoId: p.id, name: p.name, kind: p.kind, value: p.value, productIds: ids.length ? ids : undefined });
+  }
+
+  removeDiscount(accountId: string, discountId: string) {
+    this.commit((st) => {
+      const acc = st.accounts.find((x) => x.id === accountId);
+      if (!acc || acc.paidAt) return;
+      const dd = acc.discounts?.find((x) => x.id === discountId);
+      acc.discounts = acc.discounts?.filter((x) => x.id !== discountId);
+      if (dd) this.log(st, 'Quitar descuento', `${acc.tableName} cuenta ${acc.number}: ${dd.name}`);
+    });
+  }
+
+  /** Promociones activas hoy. */
+  activePromotions(): Promotion[] {
+    const wd = this.now().getDay();
+    return this.state.promotions.filter((p) => p.active && (!p.weekdays?.length || p.weekdays.includes(wd)));
   }
 
   /** Vuelve a abrir un detalle emitido sin cobrar, para agregar o corregir productos. Conserva su ID. */
@@ -356,7 +538,7 @@ export class Store {
   }
 
   /** Datos para cuadrar con la boleta. Los trabajadores solo pueden tocar su turno de hoy. */
-  updateEmitted(isAdmin: boolean, accountId: string, patch: Partial<Pick<Account, 'boleta' | 'checked' | 'paymentMethod'>>) {
+  updateEmitted(isAdmin: boolean, accountId: string, patch: Partial<Pick<Account, 'boleta' | 'checked'>>) {
     const a = this.state.accounts.find((x) => x.id === accountId);
     if (!a || a.status !== 'emitida') throw new DomainError('Cuenta no encontrada');
     const cur = this.currentTurno();
@@ -365,7 +547,6 @@ export class Store {
       const acc = d.accounts.find((x) => x.id === accountId)!;
       if (patch.boleta !== undefined) acc.boleta = patch.boleta.trim() || undefined;
       if (patch.checked !== undefined) acc.checked = patch.checked;
-      if (patch.paymentMethod) acc.paymentMethod = patch.paymentMethod;
     });
   }
 
@@ -389,7 +570,7 @@ export class Store {
           c.status = 'entregado';
           c.updatedAt = this.iso();
         });
-      this.log(d, 'Anular cuenta', `${acc.tableName} ${acc.folio ? `detalle ${folioLabel(acc.folio)}` : 'cuenta abierta'}: ${reason}`);
+      this.log(d, 'Anular cuenta', `${acc.tableName} ${acc.folio ? `detalle ${folioLabel(acc.folio)}` : 'cuenta abierta'}${acc.paidAt ? ` (cobrada ${clp(accountTotal(acc) + acc.tip)})` : ''}: ${reason}`);
     });
   }
 
@@ -407,7 +588,12 @@ export class Store {
     this.commit((d) => {
       const i = d.products.findIndex((x) => x.id === p.id);
       const prev = i >= 0 ? d.products[i] : undefined;
-      if (prev && prev.price !== p.price) this.log(d, 'Cambio de precio', `${p.name}: ${prev.price} → ${p.price}`);
+      if (!prev) this.log(d, 'Nuevo producto', `${p.name} ${clp(p.price)}`);
+      else {
+        if (prev.price !== p.price) this.log(d, 'Cambio de precio', `${p.name}: ${clp(prev.price)} → ${clp(p.price)}`);
+        if (prev.description !== p.description) this.log(d, 'Cambio de descripción', `${p.name}: «${p.description}»`);
+        if (prev.archived && !p.archived) this.log(d, 'Producto vuelve al menú', p.name);
+      }
       if (i >= 0) d.products[i] = p;
       else d.products.push(p);
     });
@@ -416,11 +602,13 @@ export class Store {
   removeProduct(isAdmin: boolean, id: string): 'archivado' | 'eliminado' {
     this.admin(isAdmin);
     const used = this.state.accounts.some((a) => a.lines.some((l) => l.productId === id));
+    const name = this.state.products.find((x) => x.id === id)?.name ?? id;
     this.commit((d) => {
       if (used) {
         const p = d.products.find((x) => x.id === id);
         if (p) p.archived = true;
       } else d.products = d.products.filter((x) => x.id !== id);
+      this.log(d, used ? 'Quitar del menú (archivado)' : 'Eliminar producto', name);
     });
     return used ? 'archivado' : 'eliminado';
   }
@@ -429,7 +617,10 @@ export class Store {
     this.admin(isAdmin);
     this.commit((d) => {
       const p = d.products.find((x) => x.id === id);
-      if (p) p.soldOut = soldOut;
+      if (p && p.soldOut !== soldOut) {
+        p.soldOut = soldOut;
+        this.log(d, soldOut ? 'Producto no disponible' : 'Producto disponible', p.name);
+      }
     });
   }
 
@@ -475,15 +666,213 @@ export class Store {
     this.admin(isAdmin);
     if (!/^\d{4,6}$/.test(s.adminPin)) throw new DomainError('El PIN debe tener de 4 a 6 números');
     if (!(s.afternoonStartsAt >= 1 && s.afternoonStartsAt <= 23)) throw new DomainError('Hora de cambio de turno inválida');
-    if (!s.paymentMethods.length) throw new DomainError('Agrega al menos un medio de pago');
+    if (PAY_METHODS.some((m) => !(s.fees[m] >= 0 && s.fees[m] < 20))) throw new DomainError('Revisa las comisiones');
+    if (!s.expenseCategories.length || !s.expenseMethods.length || !s.docTypes.length) throw new DomainError('Las listas del contador no pueden quedar vacías');
     this.commit((d) => {
+      const before = d.settings;
       d.settings = s;
+      const changed = (Object.keys(s) as (keyof Settings)[]).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(s[k]));
+      if (changed.length) this.log(d, 'Cambiar ajustes', changed.join(', ').replace('adminPin', 'PIN'));
     });
   }
 
   replaceAll(isAdmin: boolean, next: AppState) {
     this.admin(isAdmin);
-    if (next.version !== 2 || !Array.isArray(next.accounts)) throw new DomainError('El archivo no es un respaldo válido');
-    this.commit((d) => Object.assign(d, withFolio(next)));
+    const m = migrate(structuredClone(next));
+    if (!m) throw new DomainError('El archivo no es un respaldo válido');
+    this.commit((d) => {
+      Object.assign(d, m);
+      this.log(d, 'Restaurar datos', `${m.accounts.length} cuentas, ${m.expenses.length} gastos`);
+    });
+  }
+
+  // ---------- Promociones ----------
+  savePromotion(isAdmin: boolean, p: Promotion) {
+    this.admin(isAdmin);
+    if (!p.name.trim()) throw new DomainError('La promoción necesita nombre');
+    if (!(p.value > 0) || (p.kind === 'percent' && p.value > 100)) throw new DomainError('Revisa el valor del descuento');
+    this.commit((d) => {
+      const i = d.promotions.findIndex((x) => x.id === p.id);
+      if (i >= 0) d.promotions[i] = p;
+      else d.promotions.push(p);
+      this.log(d, i >= 0 ? 'Editar promoción' : 'Nueva promoción', `${p.name} (${p.kind === 'percent' ? `${p.value}%` : clp(p.value)})${p.active ? '' : ' inactiva'}`);
+    });
+  }
+
+  deletePromotion(isAdmin: boolean, id: string) {
+    this.admin(isAdmin);
+    this.commit((d) => {
+      const p = d.promotions.find((x) => x.id === id);
+      d.promotions = d.promotions.filter((x) => x.id !== id);
+      if (p) this.log(d, 'Eliminar promoción', p.name);
+    });
+  }
+
+  // ---------- Personas ----------
+  saveStaff(isAdmin: boolean, staff: Staff[]) {
+    this.admin(isAdmin);
+    const clean = staff.map((p) => ({ ...p, name: p.name.trim() })).filter((p) => p.name);
+    if (!clean.some((p) => p.role === 'admin' && p.active && p.pin)) throw new DomainError('Debe quedar al menos una persona de administración con PIN');
+    if (clean.some((p) => p.role === 'admin' && !/^\d{4,6}$/.test(p.pin ?? ''))) throw new DomainError('El PIN debe tener de 4 a 6 números');
+    const pins = clean.filter((p) => p.role === 'admin').map((p) => p.pin);
+    if (new Set(pins).size !== pins.length) throw new DomainError('Dos personas no pueden tener el mismo PIN');
+    this.commit((d) => {
+      d.staff = clean;
+      this.log(d, 'Cambiar perfiles', clean.map((p) => `${p.name} (${p.role}${p.active ? '' : ', inactiva'})`).join(', '));
+    });
+  }
+
+  // ---------- Gastos ----------
+  /** Cualquiera puede anotar un gasto (ej. compra de leche con plata de la caja). */
+  addExpense(e: Omit<Expense, 'id' | 'createdAt' | 'by'>): Expense {
+    this.checkExpense(e);
+    const x: Expense = { ...e, description: e.description.trim(), notes: e.notes.trim(), id: uid('gas'), createdAt: this.iso(), by: this.actor };
+    this.commit((d) => {
+      d.expenses.push(x);
+      this.log(d, 'Registrar gasto', `${x.date} ${x.description} ${clp(x.amount)} desde ${FUND_LABEL[x.fund]}`);
+    });
+    return x;
+  }
+
+  updateExpense(isAdmin: boolean, e: Expense) {
+    this.admin(isAdmin);
+    this.checkExpense(e);
+    this.commit((d) => {
+      const i = d.expenses.findIndex((x) => x.id === e.id);
+      if (i < 0) return;
+      const prev = d.expenses[i];
+      d.expenses[i] = { ...e, createdAt: prev.createdAt, by: prev.by };
+      this.log(d, 'Editar gasto', `${prev.description} ${clp(prev.amount)} → ${e.description} ${clp(e.amount)}`);
+    });
+  }
+
+  voidExpense(isAdmin: boolean, id: string, reason: string) {
+    this.admin(isAdmin);
+    if (!reason.trim()) throw new DomainError('Indica el motivo');
+    this.commit((d) => {
+      const e = d.expenses.find((x) => x.id === id);
+      if (!e || e.voided) return;
+      e.voided = { at: this.iso(), by: this.actor, reason: reason.trim() };
+      this.log(d, 'Anular gasto', `${e.description} ${clp(e.amount)}: ${reason}`);
+    });
+  }
+
+  private checkExpense(e: Pick<Expense, 'date' | 'description' | 'category' | 'amount' | 'fund'>) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date)) throw new DomainError('Indica la fecha');
+    if (!e.description.trim()) throw new DomainError('Describe el gasto');
+    if (!e.category) throw new DomainError('Elige la categoría');
+    if (!(e.amount > 0)) throw new DomainError('Indica el monto');
+    if (e.fund !== 'efectivo' && e.fund !== 'banco') throw new DomainError('Elige el fondo');
+  }
+
+  // ---------- Movimientos de dinero ----------
+  addMovement(isAdmin: boolean, m: Omit<Movement, 'id' | 'createdAt' | 'by'>) {
+    this.admin(isAdmin);
+    if (!(m.kind === 'ajuste' ? m.amount !== 0 : m.amount > 0)) throw new DomainError('Indica el monto');
+    if (m.kind === 'traspaso' && (!m.toFund || m.toFund === m.fund)) throw new DomainError('El traspaso necesita otro fondo de destino');
+    const x: Movement = { ...m, description: m.description.trim(), id: uid('mov'), createdAt: this.iso(), by: this.actor };
+    this.commit((d) => {
+      d.movements.push(x);
+      this.log(d, MOVEMENT_LABEL[x.kind], `${x.date} ${clp(x.amount)} ${x.kind === 'traspaso' ? `${FUND_LABEL[x.fund]} → ${FUND_LABEL[x.toFund!]}` : FUND_LABEL[x.fund]}${x.description ? `: ${x.description}` : ''}`);
+    });
+    return x;
+  }
+
+  voidMovement(isAdmin: boolean, id: string, reason: string) {
+    this.admin(isAdmin);
+    if (!reason.trim()) throw new DomainError('Indica el motivo');
+    this.commit((d) => {
+      const m = d.movements.find((x) => x.id === id);
+      if (!m || m.voided) return;
+      m.voided = { at: this.iso(), by: this.actor, reason: reason.trim() };
+      this.log(d, 'Anular movimiento', `${MOVEMENT_LABEL[m.kind]} ${clp(m.amount)}: ${reason}`);
+    });
+  }
+
+  saveReserves(isAdmin: boolean, reserves: Reserve[]) {
+    this.admin(isAdmin);
+    const clean = reserves.map((r) => ({ ...r, name: r.name.trim() })).filter((r) => r.name);
+    if (clean.some((r) => !(r.amount >= 0))) throw new DomainError('Revisa los montos reservados');
+    this.commit((d) => {
+      d.reserves = clean;
+      this.log(d, 'Cambiar reservas', clean.map((r) => `${r.name} ${clp(r.amount)}`).join(', ') || 'sin reservas');
+    });
+  }
+
+  // ---------- Propinas ----------
+  payTips(isAdmin: boolean, p: Omit<TipPayout, 'id' | 'createdAt' | 'by'>) {
+    this.admin(isAdmin);
+    if (!(p.amount > 0)) throw new DomainError('Indica el monto entregado');
+    const x: TipPayout = { ...p, note: p.note.trim(), id: uid('prp'), createdAt: this.iso(), by: this.actor };
+    this.commit((d) => {
+      d.tipPayouts.push(x);
+      this.log(d, 'Entregar propinas', `${clp(x.amount)} ${TIP_BUCKET_LABEL[x.bucket].toLowerCase()} semana ${x.week}, desde ${FUND_LABEL[x.fund]}`);
+    });
+  }
+
+  voidTipPayout(isAdmin: boolean, id: string, reason: string) {
+    this.admin(isAdmin);
+    if (!reason.trim()) throw new DomainError('Indica el motivo');
+    this.commit((d) => {
+      const p = d.tipPayouts.find((x) => x.id === id);
+      if (!p || p.voided) return;
+      p.voided = { at: this.iso(), by: this.actor, reason: reason.trim() };
+      this.log(d, 'Anular entrega de propinas', `${clp(p.amount)}: ${reason}`);
+    });
+  }
+
+  // ---------- Cuadratura y cierres ----------
+  addCount(isAdmin: boolean, c: Omit<CashCount, 'id' | 'at' | 'by'>): CashCount {
+    this.admin(isAdmin);
+    if (!(c.realCash >= 0 && c.realBank >= 0)) throw new DomainError('Ingresa lo que hay en caja y en el banco');
+    const x: CashCount = { ...c, note: c.note.trim(), id: uid('cua'), at: this.iso(), by: this.actor };
+    this.commit((d) => {
+      d.counts.push(x);
+      this.log(d, 'Cuadratura', `Efectivo ${clp(x.realCash - x.expectedCash)}, banco ${clp(x.realBank - x.expectedBank)}`);
+    });
+    return x;
+  }
+
+  setCountPending(isAdmin: boolean, id: string, pending: boolean) {
+    this.admin(isAdmin);
+    this.commit((d) => {
+      const c = d.counts.find((x) => x.id === id);
+      if (c) c.pendingReconcile = pending || undefined;
+    });
+  }
+
+  /** Cierra un turno: guarda el resumen. El dinero sigue acumulado para el turno siguiente. */
+  closeShift(day: string, turno: Turno, opts: { countedCash?: number; note: string; replace?: boolean; isAdmin?: boolean }) {
+    const prev = this.state.closes.find((c) => c.day === day && c.turno === turno);
+    if (prev && !opts.replace) throw new DomainError('Ese turno ya está cerrado');
+    if (prev && !opts.isAdmin) throw new DomainError('Solo administración puede rehacer un cierre');
+    const report = shiftReport(this.state, day, turno, this.now());
+    this.commit((d) => {
+      d.closes = d.closes.filter((c) => c !== prev && c.id !== prev?.id);
+      d.closes.push({ id: uid('cie'), day, turno, closedAt: this.iso(), by: this.actor, report, countedCash: opts.countedCash, note: opts.note.trim() });
+      const diff = opts.countedCash !== undefined ? ` · contado ${clp(opts.countedCash)} (dif. ${clp(opts.countedCash - report.cashEnd)})` : '';
+      this.log(d, prev ? 'Rehacer cierre de turno' : 'Cierre de turno', `${day} ${turno === 'mañana' ? 'AM' : 'PM'}: ventas ${clp(report.consumo)}, propinas ${clp(report.tips)}${diff}`);
+    });
+  }
+
+  // ---------- Excel del contador ----------
+  importLedger(isAdmin: boolean, rows: Omit<LedgerRow, 'id'>[]): number {
+    this.admin(isAdmin);
+    const key = (r: Omit<LedgerRow, 'id'>) => [r.date, r.tipo, r.description, r.income, r.expense].join('|');
+    const have = new Set(this.state.ledgerHistory.map(key));
+    const fresh = rows.filter((r) => !have.has(key(r)) && (have.add(key(r)), true));
+    this.commit((d) => {
+      d.ledgerHistory.push(...fresh.map((r) => ({ ...r, id: uid('his') })));
+      this.log(d, 'Importar historial', `${fresh.length} filas nuevas del Excel (${rows.length - fresh.length} repetidas)`);
+    });
+    return fresh.length;
+  }
+
+  clearLedger(isAdmin: boolean) {
+    this.admin(isAdmin);
+    this.commit((d) => {
+      this.log(d, 'Borrar historial importado', `${d.ledgerHistory.length} filas`);
+      d.ledgerHistory = [];
+    });
   }
 }

@@ -1,20 +1,41 @@
-import type { Account, AppState, Line, Product, Turno } from './types';
+import type { Account, AppliedDiscount, AppState, Line, Product, Turno } from './types';
+import { PAY_LABEL } from './types';
 
 export const IVA = 0.19;
 
 export const lineTotal = (l: Line) => l.unitPrice * l.qty;
 
-export const accountTotal = (a: Pick<Account, 'lines'>) => a.lines.reduce((s, l) => s + lineTotal(l), 0);
+/** Suma de los productos, antes de descuentos. */
+export const accountSubtotal = (a: Pick<Account, 'lines'>) => a.lines.reduce((s, l) => s + lineTotal(l), 0);
+
+/** Lo que descuenta una promoción sobre las líneas de la cuenta. */
+export function discountOf(d: AppliedDiscount, lines: Line[]): number {
+  const target = d.productIds?.length ? lines.filter((l) => d.productIds!.includes(l.productId)) : lines;
+  const base = target.reduce((s, l) => s + lineTotal(l), 0);
+  if (d.kind === 'percent') return Math.round((base * Math.min(100, Math.max(0, d.value))) / 100);
+  const units = d.productIds?.length ? target.reduce((s, l) => s + l.qty, 0) : 1;
+  return Math.min(base, Math.round(d.value * units));
+}
+
+/** Total de descuentos, nunca mayor que el consumo. */
+export function accountDiscount(a: Pick<Account, 'lines' | 'discounts'>): number {
+  const sub = accountSubtotal(a);
+  return Math.min(sub, (a.discounts ?? []).reduce((s, d) => s + discountOf(d, a.lines), 0));
+}
+
+/** Consumo: productos menos descuentos (sin propina). */
+export const accountTotal = (a: Pick<Account, 'lines' | 'discounts'>) => accountSubtotal(a) - accountDiscount(a);
 
 /** Total que paga el cliente: consumo + propina. */
-export const accountDue = (a: Pick<Account, 'lines' | 'tip'>) => accountTotal(a) + a.tip;
+export const accountDue = (a: Pick<Account, 'lines' | 'tip' | 'discounts'>) => accountTotal(a) + a.tip;
 
 export function netAndTax(total: number) {
   const neto = Math.round(total / (1 + IVA));
   return { neto, iva: total - neto };
 }
 
-export const suggestedTip = (total: number, percent: number) => Math.round((total * percent) / 100 / 10) * 10;
+/** Propina sugerida: exactamente el porcentaje del consumo, redondeado solo al peso. */
+export const suggestedTip = (total: number, percent: number) => Math.round((total * percent) / 100);
 
 /** Bolas de helado que lleva un producto con los extras elegidos. */
 export function scoopsFor(p: Product, extras: string[]): number {
@@ -43,7 +64,26 @@ export function turnoOf(d: Date | string, afternoonStartsAt: number): Turno {
   return x.getHours() < afternoonStartsAt ? 'mañana' : 'tarde';
 }
 
-export const clp = (n: number) => '$' + Math.round(n).toLocaleString('es-CL', { maximumFractionDigits: 0 });
+export const clp = (n: number) => (n < 0 ? '−$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-CL', { maximumFractionDigits: 0 });
+
+/** Suma días a una fecha YYYY-MM-DD. */
+export function addDays(day: string, n: number): string {
+  const d = new Date(day + 'T12:00');
+  d.setDate(d.getDate() + n);
+  return dayKey(d);
+}
+
+/** Lunes de la semana de un día. */
+export function weekOf(day: string): string {
+  const d = new Date(day + 'T12:00');
+  return addDays(day, -((d.getDay() + 6) % 7));
+}
+
+export const weekdayOf = (day: string) => new Date(day + 'T12:00').getDay();
+
+export function fmtDay(day: string, opts: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short' }) {
+  return new Date(day + 'T12:00').toLocaleDateString('es-CL', opts);
+}
 
 export interface Summary {
   count: number;
@@ -74,11 +114,13 @@ export function summarize(state: AppState, from: string, to: string, turno?: Tur
   const prods = new Map<string, { name: string; qty: number; total: number }>();
   const days = new Map<string, { total: number; count: number }>();
   for (const a of emitted) {
-    const m = a.paidAt ? (a.paymentMethod ?? 'Sin indicar') : 'Por cobrar';
-    const mm = methods.get(m) ?? { amount: 0, count: 0 };
-    mm.amount += accountDue(a);
-    mm.count++;
-    methods.set(m, mm);
+    const parts = !a.paidAt ? [{ m: 'Por cobrar', amount: accountDue(a) }] : a.payments?.length ? a.payments.map((p) => ({ m: PAY_LABEL[p.method], amount: p.amount })) : [{ m: a.paymentMethod ?? 'Sin indicar', amount: accountDue(a) }];
+    for (const { m, amount } of parts) {
+      const mm = methods.get(m) ?? { amount: 0, count: 0 };
+      mm.amount += amount;
+      mm.count++;
+      methods.set(m, mm);
+    }
     const t = turnos.get(a.turno!) ?? { count: 0, total: 0 };
     t.count++;
     t.total += accountTotal(a);
