@@ -1,15 +1,29 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { demoState } from './domain/demo';
-import { DomainError, localPersistence, Store } from './domain/store';
+import { DomainError, Store } from './domain/store';
+import { idbPersistence } from './persist';
+import { startSync } from './sync';
 import { dayKey, turnoOf } from './domain/calc';
 import type { AppState } from './domain/types';
 
-const store = new Store(localPersistence('dolce-rosa:v7'), () => demoState());
-const StoreCtx = createContext(store);
+let store: Store;
+const StoreCtx = createContext<Store>(null!);
+
+/** Abre los datos guardados en este equipo y, si está configurada, la sincronización. */
+export async function boot() {
+  store = new Store(await idbPersistence('dolce-rosa:v8', 'dolce-rosa:v7'), () => demoState());
+  startSync(store);
+}
 
 interface Ui {
   isAdmin: boolean;
-  setAdmin(v: boolean): void;
+  /** Nombre de quien entró como administración. */
+  adminName: string;
+  /** Entra con el nombre de la persona de administración, o sale con false. */
+  setAdmin(v: string | false): void;
+  /** Quién atiende en este equipo (trabajadora). */
+  who: string;
+  setWho(name: string): void;
   toast(msg: string, kind?: 'ok' | 'error'): void;
   /** Tema visible: Día (mañana) o Tarde. Sigue al turno salvo que alguien lo cambie a mano. */
   theme: Theme;
@@ -20,6 +34,22 @@ export type Theme = 'dia' | 'tarde';
 const UiCtx = createContext<Ui>(null!);
 
 const ADMIN_KEY = 'dolce-rosa:admin';
+const WHO_KEY = 'dolce-rosa:quien';
+const read = (st: Storage | undefined, k: string) => {
+  try {
+    return st?.getItem(k) ?? '';
+  } catch {
+    return '';
+  }
+};
+const write = (st: Storage | undefined, k: string, v: string) => {
+  try {
+    if (v) st?.setItem(k, v);
+    else st?.removeItem(k);
+  } catch {
+    /* sin almacenamiento */
+  }
+};
 const THEME_KEY = 'dolce-rosa:tema';
 
 /** Elección manual del tema, válida solo durante el turno en que se hizo. */
@@ -65,23 +95,23 @@ function useThemeState(afternoonStartsAt: number) {
 }
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(() => {
-    try {
-      return sessionStorage.getItem(ADMIN_KEY) === '1';
-    } catch {
-      return false;
-    }
+  // Antes se guardaba '1'; ahora el nombre de quien entró.
+  const [adminName, setAdminName] = useState(() => {
+    const v = read(globalThis.sessionStorage, ADMIN_KEY);
+    return v === '1' ? 'Administración' : v;
   });
+  const isAdmin = !!adminName;
+  const [who, setWhoState] = useState(() => read(globalThis.localStorage, WHO_KEY));
+  const setWho = useCallback((name: string) => {
+    setWhoState(name);
+    write(globalThis.localStorage, WHO_KEY, name);
+  }, []);
+  store.actor = adminName || who || 'Sin nombre';
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: 'ok' | 'error' }[]>([]);
 
-  const setAdmin = useCallback((v: boolean) => {
-    setIsAdmin(v);
-    try {
-      if (v) sessionStorage.setItem(ADMIN_KEY, '1');
-      else sessionStorage.removeItem(ADMIN_KEY);
-    } catch {
-      /* sin almacenamiento de sesión */
-    }
+  const setAdmin = useCallback((v: string | false) => {
+    setAdminName(v || '');
+    write(globalThis.sessionStorage, ADMIN_KEY, v || '');
   }, []);
 
   const toast = useCallback((msg: string, kind: 'ok' | 'error' = 'ok') => {
@@ -96,7 +126,7 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <StoreCtx.Provider value={store}>
-      <UiCtx.Provider value={{ isAdmin, setAdmin, toast, ...themeState }}>
+      <UiCtx.Provider value={{ isAdmin, adminName, setAdmin, who, setWho, toast, ...themeState }}>
         {children}
         <div className="toasts" role="status" aria-live="polite">
           {toasts.map((t) => (

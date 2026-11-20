@@ -65,7 +65,7 @@ describe('mesa: pedido, comandas y detalle', () => {
     expect(() => s.addLine(table.id, { productId: prod('Amanecer luco').id, extras: [], qty: 1, note: '' })).toThrow(/tamaño|opción|elige/i);
     expect(() => s.addLine(table.id, { productId: prod('Espresso').id, extras: ['Oro'], qty: 1, note: '' })).toThrow(/Extra/);
     s.setSoldOut(true, prod('Pie de limón').id, true);
-    expect(() => s.addLine(table.id, { productId: prod('Pie de limón').id, extras: [], qty: 1, note: '' })).toThrow(/agotado/);
+    expect(() => s.addLine(table.id, { productId: prod('Pie de limón').id, extras: [], qty: 1, note: '' })).toThrow(/no está disponible/);
   });
 
   it('emite el detalle antes del pago, cobra después y recién ahí libera la mesa', () => {
@@ -86,13 +86,13 @@ describe('mesa: pedido, comandas y detalle', () => {
     s.send(acc.id);
     s.emit(acc.id);
     expect(s.get().accounts.find((a) => a.id === acc.id)!.folio).toBe(1);
-    expect(() => s.pay(acc.id, { tip: 0, paymentMethod: '' })).toThrow(/medio de pago/);
-    s.pay(acc.id, { tip: 400, paymentMethod: 'Débito', boleta: '123' });
+    expect(() => s.pay(acc.id, { tip: 0 })).toThrow(/medio de pago/);
+    s.pay(acc.id, { tip: 400, paymentMethod: 'debito', boleta: '123' });
     e = s.get().accounts.find((a) => a.id === acc.id)!;
-    expect(e).toMatchObject({ paymentMethod: 'Débito', boleta: '123', tip: 400 });
+    expect(e).toMatchObject({ paymentMethod: 'Débito', boleta: '123', tip: 400, payDay: '2026-11-05', payTurno: 'tarde' });
     expect(accountDue(e)).toBe(1990 * 2 + 400);
     expect(s.openAccountFor(table.id)).toBeUndefined();
-    expect(() => s.pay(acc.id, { tip: 0, paymentMethod: 'Efectivo' })).toThrow(/ya está pagado/);
+    expect(() => s.pay(acc.id, { tip: 0, paymentMethod: 'efectivo' })).toThrow(/ya está pagado/);
     // El siguiente detalle toma el número siguiente, aunque sea de otra mesa.
     const other = s.addLine(s.get().tables[1].id, { productId: prod('Espresso').id, extras: [], qty: 1, note: '' });
     s.send(other.id);
