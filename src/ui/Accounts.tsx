@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import { accountDue, accountTotal, clp, folioLabel, isPending, lineTotal, summarize } from '../domain/calc';
+import { accountDiscount, accountDue, accountTotal, clp, folioLabel, isPending, lineTotal, summarize } from '../domain/calc';
+import { paymentsOf } from '../domain/money';
 import type { Account, Turno } from '../domain/types';
+import { PAY_LABEL, TURNO_LABEL } from '../domain/types';
+import { CloseShiftSheet } from './Finance';
 import { accountHtml, printHtml } from '../print';
 import { canPrint, useAction, useAppState, useStore, useUi } from '../state';
 import { downloadFile, Empty, Segmented, Sheet, toCsv } from './kit';
@@ -20,6 +23,7 @@ export function Accounts() {
   const [q, setQ] = useState('');
   const qd = q.replace(/\D/g, '');
   const [open, setOpen] = useState<Account | null>(null);
+  const [closing, setClosing] = useState(false);
 
   // Los trabajadores solo ven su turno de hoy.
   const d = isAdmin ? day : cur.day;
@@ -154,6 +158,12 @@ export function Accounts() {
         </ul>
       )}
 
+      <div className="pad">
+        <button className="btn-secondary wide" onClick={() => setClosing(true)}>
+          Cierre de turno {TURNO_LABEL[cur.turno]}
+        </button>
+      </div>
+      {closing && <CloseShiftSheet day={cur.day} turno={cur.turno} onClose={() => setClosing(false)} />}
       {open && <AccountSheet id={open.id} onClose={() => setOpen(null)} />}
     </div>
   );
@@ -168,6 +178,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
   const [boleta, setBoleta] = useState(a.boleta ?? '');
   const [voiding, setVoiding] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
   const cur = store.currentTurno();
   const editable = a.status === 'emitida' && (isAdmin || (a.day === cur.day && a.turno === cur.turno));
 
@@ -190,6 +201,12 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
           ))}
         </ul>
         <footer>
+          {accountDiscount(a) > 0 && (
+            <div className="rc-line">
+              <span>Descuentos ({a.discounts!.map((d) => d.name).join(', ')})</span>
+              <span>−{clp(accountDiscount(a))}</span>
+            </div>
+          )}
           <div className="rc-line">
             <span>Consumo</span>
             <span>{clp(accountTotal(a))}</span>
@@ -222,18 +239,41 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
           </button>
         </div>
       )}
+      {a.paidAt && a.status === 'emitida' && (
+        <section className="group">
+          <h2 className="group-title">Pago</h2>
+          <ul className="list">
+            {paymentsOf(a).map((p, i) => (
+              <li key={i} className="kv">
+                <span>
+                  {PAY_LABEL[p.method]}
+                  {p.method === 'transferencia' && p.received === false && <span className="pill pill-warn tag-gap">Por recibir</span>}
+                </span>
+                <span className="muted">
+                  {p.tip ? `propina ${clp(p.tip)}` : ''}
+                  {isAdmin && p.fee ? ` · comisión ${clp(p.fee)}` : ''}
+                </span>
+                <strong>{clp(p.amount)}</strong>
+                {isAdmin && p.method === 'transferencia' && (
+                  <button className="btn-plain small" onClick={() => run(() => store.setTransferReceived(isAdmin, a.id, i, p.received === false))}>
+                    {p.received === false ? 'Marcar recibida' : 'Marcar por recibir'}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            Cobró {a.paidBy ?? '—'} el {new Date(a.paidAt).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })}
+          </p>
+          {isAdmin && (
+            <button className="btn-plain" onClick={() => setCorrecting(true)}>
+              Corregir pago o propina
+            </button>
+          )}
+        </section>
+      )}
       {editable && !isPending(a) && (
         <>
-          <fieldset className="choice">
-            <legend>Medio de pago</legend>
-            <div className="method-grid">
-              {state.settings.paymentMethods.map((m) => (
-                <button key={m} className={`method ${a.paymentMethod === m ? 'on' : ''}`} onClick={() => run(() => store.updateEmitted(isAdmin, a.id, { paymentMethod: m }))}>
-                  {m}
-                </button>
-              ))}
-            </div>
-          </fieldset>
           <div className="field-row">
             <label className="field grow" htmlFor="sheet-boleta">
               <span>N° de boleta</span>
@@ -262,6 +302,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
         )}
       </div>
       {paying && <PaySheet account={a} onClose={() => setPaying(false)} onDone={() => setPaying(false)} />}
+      {correcting && <PaySheet account={a} correcting onClose={() => setCorrecting(false)} onDone={() => setCorrecting(false)} />}
       {voiding && (
         <ReasonSheet
           title={a.folio ? `Anular detalle ${folioLabel(a.folio)}` : `Anular cuenta de ${a.tableName}`}

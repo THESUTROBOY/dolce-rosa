@@ -1,6 +1,7 @@
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
-import type { Account, Comanda, Settings } from './domain/types';
-import { STATION_LABEL } from './domain/types';
+import { accountDue, accountSubtotal, accountTotal, clp, discountOf, fmtDay, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
+import { paymentsOf } from './domain/money';
+import type { Account, Comanda, Settings, ShiftClose } from './domain/types';
+import { PAY_LABEL, STATION_LABEL, TURNO_LABEL } from './domain/types';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const when = (iso: string) => new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
@@ -25,12 +26,20 @@ export function accountHtml(a: Account, s: Settings) {
   <hr><div class="c"><b>${a.folio ? `DETALLE DE CUENTA N° ${folioLabel(a.folio)}` : 'PRECUENTA'}</b></div>${a.turno && a.folio ? `<div class="c s">Turno ${a.turno}</div>` : ''}
   <div class="r"><span>${esc(a.tableName)}</span><span>${when(a.emittedAt ?? new Date().toISOString())}</span></div><hr>
   ${lines}<hr>
+  ${
+    a.discounts?.length
+      ? `<div class="r"><span>Subtotal</span><span>${clp(accountSubtotal(a))}</span></div>` +
+        a.discounts.map((d) => `<div class="r"><span>${esc(d.name)}</span><span>-${clp(discountOf(d, a.lines))}</span></div>`).join('')
+      : ''
+  }
   <div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>
   <div class="r s"><span>Neto ${clp(neto)}</span><span>IVA ${clp(iva)}</span></div>
   ${
     a.paidAt
       ? (a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div><div class="r b"><span>PAGADO</span><span>${clp(accountDue(a))}</span></div>` : '') +
-        (a.paymentMethod ? `<div class="r"><span>Pago</span><span>${esc(a.paymentMethod)}</span></div>` : '')
+        paymentsOf(a)
+          .map((p) => `<div class="r"><span>${PAY_LABEL[p.method]}</span><span>${clp(p.amount)}</span></div>`)
+          .join('')
       : s.tipPercent > 0
         ? `<hr><div class="r"><span>Propina sugerida ${s.tipPercent}%</span><span>${clp(suggestedTip(total, s.tipPercent))}</span></div><div class="r b"><span>TOTAL CON PROPINA</span><span>${clp(total + suggestedTip(total, s.tipPercent))}</span></div>`
         : ''
@@ -57,4 +66,21 @@ export function printHtml(html: string) {
     f.contentWindow?.print();
     setTimeout(() => f.remove(), 1500);
   }, 60);
+}
+
+export function shiftHtml(c: ShiftClose, business: string) {
+  const r = c.report;
+  const row = (a: string, b: string) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
+  return `<style>${PAGE}</style><h1>${esc(business)}</h1><div class="c"><b>CIERRE DE TURNO ${TURNO_LABEL[c.turno]}</b></div>
+  <div class="c s">${fmtDay(c.day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="c s">Cerró ${esc(c.by)} · ${when(c.closedAt)}</div><hr>
+  ${row('Cuentas', String(r.sales))}${r.discounts ? row('Descuentos', clp(r.discounts)) : ''}${row('Ventas sin propina', clp(r.consumo))}${row('Propinas', clp(r.tips))}${row('Comisiones', clp(r.fees))}
+  <div class="r b"><span>Ingreso líquido</span><span>${clp(r.net)}</span></div><hr>
+  ${r.byMethod
+    .filter((m) => m.count)
+    .map((m) => row(`${PAY_LABEL[m.method]} (${m.count})`, clp(m.amount)) + (m.tip ? `<div class="n">propina ${clp(m.tip)}</div>` : ''))
+    .join('')}<hr>
+  ${row('Efectivo inicio', clp(r.cashStart))}${row('Gastos caja', '-' + clp(r.expenses[0].amount))}${row('Gastos banco', '-' + clp(r.expenses[1].amount))}${r.tipPayouts ? row('Propinas entregadas', '-' + clp(r.tipPayouts)) : ''}
+  <div class="r b"><span>Efectivo esperado</span><span>${clp(r.cashEnd)}</span></div>
+  ${c.countedCash !== undefined ? row('Efectivo contado', clp(c.countedCash)) + row('Diferencia', clp(c.countedCash - r.cashEnd)) : ''}
+  ${row('Abonos MP pendientes', clp(r.pendingMp))}${c.note ? `<hr><div class="s">${esc(c.note)}</div>` : ''}<hr>`;
 }

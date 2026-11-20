@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, occupiesTable, scoopsFor, suggestedTip } from '../domain/calc';
-import type { Account, Comanda, Line, Product, Station } from '../domain/types';
-import { STATION_LABEL } from '../domain/types';
+import { accountDiscount, accountDue, accountSubtotal, accountTotal, clp, discountOf, folioLabel, lineTotal, netAndTax, occupiesTable, scoopsFor, suggestedTip } from '../domain/calc';
+import { splitTip } from '../domain/money';
+import type { Account, Comanda, Line, PayMethod, Product, Station } from '../domain/types';
+import { PAY_LABEL, PAY_METHODS, STATION_LABEL } from '../domain/types';
 import { accountHtml, printHtml } from '../print';
 import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
 import { MoneyField, Segmented, Sheet, Stepper } from './kit';
@@ -142,7 +143,7 @@ function MenuPane({ onPick }: { onPick(p: Product): void }) {
                     <span className="row-main">
                       <span className="row-title">{p.name}</span>
                       <span className="row-sub">
-                        {p.soldOut ? 'Agotado' : [p.description, p.extras.length ? `${p.extras.length} ${p.extras.length === 1 ? 'extra' : 'extras'}` : ''].filter(Boolean).join(' · ')}
+                        {p.soldOut ? 'No disponible' : [p.description, p.extras.length ? `${p.extras.length} ${p.extras.length === 1 ? 'extra' : 'extras'}` : ''].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                     <span className="row-price">{priceLabel(p)}</span>
@@ -175,6 +176,10 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
   const store = useStore();
   const [variant, setVariant] = useState(product.variants[0]?.name);
   const [extras, setExtras] = useState<string[]>([]);
+  const state0 = useAppState();
+  const catExtras = state0.categories.find((c) => c.id === product.categoryId)?.extras ?? [];
+  // Extras del producto y de su categoría (ej. agregados del gohan), sin repetir.
+  const allExtras = [...product.extras, ...catExtras.filter((c) => !product.extras.some((x) => x.name === c.name))];
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState('');
   const [choices, setChoices] = useState<Record<string, string[]>>({});
@@ -183,7 +188,7 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
   const missing =
     (product.choices ?? []).find((g) => !choices[g.name]?.length)?.name.toLowerCase() ??
     (Array.from({ length: scoops }, (_, i) => flavors[i]?.trim()).some((f) => !f) ? (scoops === 1 ? 'sabor del helado' : 'sabores del helado') : null);
-  const unit = (variant ? product.variants.find((v) => v.name === variant)!.price : product.price) + extras.reduce((s, e) => s + (product.extras.find((x) => x.name === e)?.price ?? 0), 0);
+  const unit = (variant ? product.variants.find((v) => v.name === variant)!.price : product.price) + extras.reduce((s, e) => s + (allExtras.find((x) => x.name === e)?.price ?? 0), 0);
   const station: Station = store.stationOf(product.id);
   const samePrice = product.variants.every((v) => v.price === product.variants[0].price);
 
@@ -224,17 +229,17 @@ function AddSheet({ tableId, product, onClose }: { tableId: string; product: Pro
           ))}
         </fieldset>
       )}
-      {product.extras.length > 0 && (
+      {allExtras.length > 0 && (
         <fieldset className="choice">
           <legend>Extras</legend>
-          {product.extras.map((x) => {
+          {allExtras.map((x) => {
             const on = extras.includes(x.name);
             return (
               <label key={x.name} className={`choice-row ${on ? 'on' : ''}`}>
                 <input
                   type="checkbox"
                   checked={on}
-                  onChange={() => setExtras((s) => (on ? s.filter((n) => n !== x.name) : product.extras.map((y) => y.name).filter((n) => s.includes(n) || n === x.name)))}
+                  onChange={() => setExtras((s) => (on ? s.filter((n) => n !== x.name) : allExtras.map((y) => y.name).filter((n) => s.includes(n) || n === x.name)))}
                 />
                 <span>{x.name}</span>
                 <span className="choice-price">+{clp(x.price)}</span>
@@ -488,6 +493,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
   const [payOpen, setPayOpen] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState<Line | null>(null);
+  const [discounting, setDiscounting] = useState(false);
   const comandas = useMemo(() => new Map<string, Comanda>(state.comandas.map((c) => [c.id, c])), [state.comandas]);
 
   if (!account) {
@@ -552,6 +558,25 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
           })}
         </ul>
         <footer>
+          {(account.discounts?.length ?? 0) > 0 && (
+            <>
+              <div className="rc-line">
+                <span>Subtotal</span>
+                <span>{clp(accountSubtotal(account))}</span>
+              </div>
+              {account.discounts!.map((d) => (
+                <div className="rc-line rc-discount" key={d.id}>
+                  <span>
+                    {d.name}
+                    <button className="btn-plain danger small" onClick={() => run(() => store.removeDiscount(account.id, d.id), 'Descuento quitado')} aria-label={`Quitar ${d.name}`}>
+                      Quitar
+                    </button>
+                  </span>
+                  <span>−{clp(discountOf(d, account.lines))}</span>
+                </div>
+              ))}
+            </>
+          )}
           <div className="rc-line rc-total">
             <span>Total</span>
             <span>{clp(total)}</span>
@@ -618,6 +643,11 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
             </button>
           </>
         )}
+        {account.lines.length > 0 && (state.promotions.some((p) => p.active) || isAdmin) && (
+          <button className="btn-plain" onClick={() => setDiscounting(true)}>
+            Aplicar promoción o descuento
+          </button>
+        )}
         {isAdmin && (
           <button className="btn-plain danger" onClick={() => setRemoving({ id: '__all__' } as Line)}>
             Anular cuenta completa
@@ -635,6 +665,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
           }}
         />
       )}
+      {discounting && <DiscountSheet account={account} onClose={() => setDiscounting(false)} />}
       {moving && (
         <Sheet title="Cambiar de mesa" onClose={() => setMoving(false)}>
           <div className="move-grid">
@@ -676,6 +707,82 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
   );
 }
 
+function DiscountSheet({ account, onClose }: { account: Account; onClose(): void }) {
+  const store = useStore();
+  const run = useAction();
+  const { isAdmin } = useUi();
+  const promos = store.activePromotions();
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<'percent' | 'amount'>('percent');
+  const [value, setValue] = useState(0);
+  const applied = new Set(account.discounts?.map((d) => d.promoId));
+  return (
+    <Sheet title="Promociones y descuentos" onClose={onClose}>
+      {promos.length > 0 ? (
+        <ul className="list">
+          {promos.map((p) => (
+            <li key={p.id}>
+              <button
+                className="row-btn"
+                disabled={applied.has(p.id)}
+                onClick={() => {
+                  if (run(() => (store.applyPromotion(account.id, p.id), true), `${p.name} aplicada`)) onClose();
+                }}
+              >
+                <span className="row-main">
+                  <span className="row-title">{p.name}</span>
+                  <span className="row-sub">
+                    {p.kind === 'percent' ? `${p.value}% de descuento` : `${clp(p.value)} menos`}
+                    {p.productIds.length || p.categoryIds.length ? ' en productos seleccionados' : ' en toda la cuenta'}
+                    {applied.has(p.id) ? ' · ya aplicada' : ''}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">No hay promociones activas hoy. Administración las crea en Configurar → Promociones.</p>
+      )}
+      {isAdmin && (
+        <fieldset className="choice">
+          <legend>Descuento manual (administración)</legend>
+          <label className="field" htmlFor="dto-name">
+            <span>Motivo o nombre</span>
+            <input id="dto-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: cortesía, cliente frecuente" />
+          </label>
+          <Segmented<'percent' | 'amount'>
+            label="Tipo"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: 'percent', label: 'Porcentaje' },
+              { value: 'amount', label: 'Monto fijo' },
+            ]}
+          />
+          {kind === 'percent' ? (
+            <label className="field" htmlFor="dto-pct">
+              <span>Porcentaje</span>
+              <input id="dto-pct" inputMode="numeric" value={value || ''} placeholder="0" onChange={(e) => setValue(Math.min(100, Number(e.target.value.replace(/\D/g, '') || 0)))} />
+            </label>
+          ) : (
+            <MoneyField id="dto-amt" label="Monto" value={value} onChange={setValue} />
+          )}
+          <button
+            className="btn-primary wide"
+            disabled={!name.trim() || !value}
+            onClick={() => {
+              if (run(() => (store.applyDiscount(isAdmin, account.id, { name, kind, value }), true), 'Descuento aplicado')) onClose();
+            }}
+          >
+            Aplicar descuento
+          </button>
+        </fieldset>
+      )}
+    </Sheet>
+  );
+}
+
 export function ReasonSheet({ title, onClose, onConfirm }: { title: string; onClose(): void; onConfirm(reason: string): void }) {
   const [reason, setReason] = useState('');
   return (
@@ -696,74 +803,173 @@ export function ReasonSheet({ title, onClose, onConfirm }: { title: string; onCl
   );
 }
 
-export function PaySheet({ account, onClose, onDone }: { account: Account; onClose(): void; onDone(): void }) {
+type TipMode = 'sugerida' | 'otra' | 'sin';
+interface PayRow {
+  method: PayMethod;
+  amount: number;
+  received: boolean;
+}
+
+export function PaySheet({ account, onClose, onDone, correcting }: { account: Account; onClose(): void; onDone(): void; correcting?: boolean }) {
   const state = useAppState();
   const store = useStore();
   const run = useAction();
+  const { isAdmin } = useUi();
   const total = accountTotal(account);
-  const suggested = suggestedTip(total, state.settings.tipPercent);
-  const [tipMode, setTipMode] = useState<'sugerida' | 'sin' | 'otra'>(account.tableName === 'Para llevar' ? 'sin' : 'sugerida');
-  const [otherTip, setOtherTip] = useState(0);
-  const [method, setMethod] = useState('');
-  const [boleta, setBoleta] = useState('');
+  const pct = state.settings.tipPercent;
+  const suggested = suggestedTip(total, pct);
+  const [tipMode, setTipMode] = useState<TipMode>(correcting ? (account.tip === suggested ? 'sugerida' : account.tip ? 'otra' : 'sin') : account.tableName === 'Para llevar' ? 'sin' : 'sugerida');
+  const [otherTip, setOtherTip] = useState(correcting ? account.tip : 0);
   const tip = tipMode === 'sugerida' ? suggested : tipMode === 'otra' ? otherTip : 0;
+  const due = total + tip;
+  const [rows, setRows] = useState<PayRow[]>(() => (correcting && account.payments?.length ? account.payments.map((p) => ({ method: p.method, amount: p.amount, received: p.received !== false })) : []));
+  const [split, setSplit] = useState(rows.length > 1);
+  const [cashGiven, setCashGiven] = useState(0);
+  const [boleta, setBoleta] = useState(account.boleta ?? '');
+  const [reason, setReason] = useState('');
+  // Un solo medio: el monto sigue al total (cambia si cambia la propina).
+  const effective: PayRow[] = split ? rows : rows.slice(0, 1).map((r) => ({ ...r, amount: due }));
+  const paid = effective.reduce((a, r) => a + r.amount, 0);
+  const left = due - paid;
+  const tips = splitTip(effective.map((r) => r.amount), tip);
+  const ready = effective.length > 0 && left === 0 && effective.every((r) => r.amount > 0) && (!correcting || reason.trim());
+  const cashRow = effective.find((r) => r.method === 'efectivo');
+  const pick = (m: PayMethod) => setRows([{ method: m, amount: due, received: true }]);
+  const setRow = (i: number, patch: Partial<PayRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  const submit = () => {
+    const input = { tip, boleta, payments: effective.map((r, i) => ({ method: r.method, amount: r.amount, tip: tips[i], received: r.received })) };
+    const ok = run(() => (correcting ? store.correctPayment(isAdmin, account.id, input, reason) : store.pay(account.id, input), true), correcting ? 'Pago corregido' : undefined);
+    if (ok) {
+      navigator.vibrate?.([10, 40, 10]);
+      onDone();
+    }
+  };
 
   return (
     <Sheet
-      title={`Registrar pago · ${folioLabel(account.folio)}`}
+      title={`${correcting ? 'Corregir pago' : 'Registrar pago'} · ${folioLabel(account.folio)}`}
       onClose={onClose}
       size="tall"
       footer={
-        <button
-          className="btn-primary wide"
-          disabled={!method}
-          onClick={() => {
-            const ok = run(() => (store.pay(account.id, { tip, paymentMethod: method, boleta }), true));
-            if (ok) {
-              navigator.vibrate?.([10, 40, 10]);
-              onDone();
-            }
-          }}
-        >
-          {method ? `Registrar pago · ${clp(total + tip)}` : 'Elige el medio de pago'}
+        <button className="btn-primary wide" disabled={!ready} onClick={submit}>
+          {!effective.length ? 'Elige el medio de pago' : left > 0 ? `Faltan ${clp(left)}` : left < 0 ? `Sobran ${clp(-left)}` : `${correcting ? 'Guardar corrección' : 'Registrar pago'} · ${clp(due)}`}
         </button>
       }
     >
       <div className="emit-total">
-        <span>Consumo</span>
+        <span>Consumo{accountDiscount(account) ? ` (con ${clp(accountDiscount(account))} de descuento)` : ''}</span>
         <strong>{clp(total)}</strong>
       </div>
       <fieldset className="choice">
-        <legend>Propina (voluntaria)</legend>
-        <Segmented<'sugerida' | 'sin' | 'otra'>
+        <legend>Propina (voluntaria, no es venta)</legend>
+        <Segmented<TipMode>
           label="Propina"
           value={tipMode}
           onChange={setTipMode}
           options={[
-            { value: 'sugerida', label: `${state.settings.tipPercent}% · ${clp(suggested)}` },
-            { value: 'sin', label: 'Sin propina' },
+            { value: 'sugerida', label: `${pct}% · ${clp(suggested)}` },
             { value: 'otra', label: 'Otro monto' },
+            { value: 'sin', label: 'Sin propina' },
           ]}
         />
-        {tipMode === 'otra' && <MoneyField id="tip-other" label="Monto de propina" value={otherTip} onChange={setOtherTip} />}
+        {tipMode === 'otra' && (
+          <>
+            <MoneyField id="tip-other" label="Monto de propina (puede ser más o menos que el 10 %)" value={otherTip} onChange={setOtherTip} />
+            {total > 0 && otherTip > 0 && <p className="hint">Equivale al {Math.round((otherTip / total) * 1000) / 10}% del consumo.</p>}
+          </>
+        )}
       </fieldset>
       <fieldset className="choice">
-        <legend>Medio de pago</legend>
-        <div className="method-grid">
-          {state.settings.paymentMethods.map((m) => (
-            <button key={m} className={`method ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)} aria-pressed={method === m}>
-              {m}
+        <legend>
+          Medio de pago
+          <label className="toggle inline-toggle">
+            <input
+              type="checkbox"
+              checked={split}
+              onChange={(e) => {
+                setSplit(e.target.checked);
+                if (e.target.checked) setRows(rows.length ? [{ ...rows[0], amount: due }] : [{ method: 'efectivo', amount: due, received: true }]);
+                else setRows(rows.slice(0, 1));
+              }}
+            />
+            <span>Pago combinado</span>
+          </label>
+        </legend>
+        {!split ? (
+          <div className="method-grid">
+            {PAY_METHODS.map((m) => (
+              <button key={m} className={`method ${rows[0]?.method === m ? 'on' : ''}`} onClick={() => pick(m)} aria-pressed={rows[0]?.method === m}>
+                {PAY_LABEL[m]}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="pay-rows">
+            {rows.map((r, i) => (
+              <div className="pay-row" key={i}>
+                <select aria-label="Medio" value={r.method} onChange={(e) => setRow(i, { method: e.target.value as PayMethod })}>
+                  {PAY_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {PAY_LABEL[m]}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  aria-label="Monto"
+                  inputMode="numeric"
+                  value={r.amount ? '$' + r.amount.toLocaleString('es-CL') : ''}
+                  placeholder="$0"
+                  onChange={(e) => setRow(i, { amount: Number(e.target.value.replace(/\D/g, '') || 0) })}
+                />
+                <span className="pay-tip muted">{tips[i] ? `propina ${clp(tips[i])}` : ''}</span>
+                {rows.length > 1 && (
+                  <button className="btn-plain danger small" onClick={() => setRows(rows.filter((_, j) => j !== i))} aria-label="Quitar medio">
+                    Quitar
+                  </button>
+                )}
+              </div>
+            ))}
+            <button className="btn-plain" onClick={() => setRows([...rows, { method: rows.some((x) => x.method === 'efectivo') ? 'debito' : 'efectivo', amount: Math.max(0, left), received: true }])}>
+              + Agregar otro medio {left > 0 ? `por ${clp(left)}` : ''}
             </button>
-          ))}
-        </div>
+            <p className={`hint ${left ? 'warn-text' : ''}`}>{left === 0 ? 'Los pagos cuadran con el total.' : left > 0 ? `Faltan ${clp(left)} por asignar.` : `Los pagos suman ${clp(-left)} de más.`}</p>
+          </div>
+        )}
+        {effective.some((r) => r.method === 'transferencia') && (
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={effective.filter((r) => r.method === 'transferencia').every((r) => r.received)}
+              onChange={(e) => setRows(rows.map((r) => (r.method === 'transferencia' ? { ...r, received: e.target.checked } : r)))}
+            />
+            <span>La transferencia ya se ve en la cuenta</span>
+          </label>
+        )}
+        {cashRow && !correcting && (
+          <div className="cash-change">
+            <MoneyField id="cash-given" label="Efectivo recibido (para calcular el vuelto)" value={cashGiven} onChange={setCashGiven} />
+            {cashGiven > cashRow.amount && (
+              <p className="change-due">
+                Vuelto: <strong>{clp(cashGiven - cashRow.amount)}</strong>
+              </p>
+            )}
+          </div>
+        )}
       </fieldset>
       <label className="field" htmlFor="boleta">
         <span>N° de boleta (opcional, para cuadrar)</span>
         <input id="boleta" inputMode="numeric" value={boleta} onChange={(e) => setBoleta(e.target.value.replace(/[^\d-]/g, ''))} placeholder="Se puede agregar después" />
       </label>
+      {correcting && (
+        <label className="field" htmlFor="pay-reason">
+          <span>Motivo de la corrección (queda registrado)</span>
+          <input id="pay-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </label>
+      )}
       <div className="emit-total big">
         <span>Total a pagar</span>
-        <strong>{clp(total + tip)}</strong>
+        <strong>{clp(due)}</strong>
       </div>
     </Sheet>
   );

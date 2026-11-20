@@ -1,12 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { useAppState, useUi } from './state';
+import { useAppState } from './state';
 import { Accounts } from './ui/Accounts';
 import { Admin } from './ui/Admin';
+import { Expenses } from './ui/Expenses';
+import { SyncDot } from './ui/Sync';
 import { Kitchen } from './ui/Kitchen';
 import { Tables } from './ui/Tables';
 import { TableView } from './ui/TableView';
 
-type Tab = 'mesas' | 'cocina' | 'cuentas' | 'config';
+type Tab = 'mesas' | 'cocina' | 'cuentas' | 'gastos' | 'config';
 
 const Icon = ({ d }: { d: ReactNode }) => (
   <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -35,6 +37,12 @@ const ICONS: Record<Tab, ReactNode> = {
       <path d="M9 8.5h6M9 12h6M9 15.5h3" />
     </>
   ),
+  gastos: (
+    <>
+      <rect x="3.5" y="6" width="17" height="12.5" rx="2.5" />
+      <path d="M3.5 10h17M7 14.5h4" />
+    </>
+  ),
   config: (
     <>
       <circle cx="12" cy="12" r="3" />
@@ -45,13 +53,12 @@ const ICONS: Record<Tab, ReactNode> = {
 
 function readHash(): { tab: Tab; table: string | null } {
   const h = location.hash.replace('#', '');
-  if (h === 'cocina' || h === 'cuentas' || h === 'config') return { tab: h, table: null };
+  if (h === 'cocina' || h === 'cuentas' || h === 'gastos' || h === 'config') return { tab: h, table: null };
   return { tab: 'mesas', table: null };
 }
 
 export default function App() {
   const state = useAppState();
-  const { isAdmin } = useUi();
   const [tab, setTab] = useState<Tab>(() => readHash().tab);
   const [table, setTable] = useState<string | null>(null);
 
@@ -71,7 +78,8 @@ export default function App() {
     { t: 'mesas', label: 'Mesas', badge: readyCount },
     { t: 'cocina', label: 'Cocina', badge: kitchenCount },
     { t: 'cuentas', label: 'Cuentas' },
-    { t: 'config', label: isAdmin ? 'Admin' : 'Configurar' },
+    { t: 'gastos', label: 'Gastos' },
+    { t: 'config', label: 'Admin' },
   ];
 
   return (
@@ -80,6 +88,7 @@ export default function App() {
         {tab === 'mesas' && (table ? <TableView key={table} tableId={table} onBack={() => setTable(null)} /> : <Tables onOpen={setTable} />)}
         {tab === 'cocina' && <Kitchen />}
         {tab === 'cuentas' && <Accounts />}
+        {tab === 'gastos' && <Expenses />}
         {tab === 'config' && <Admin />}
       </main>
       <nav className="tabbar" aria-label="Secciones">
@@ -96,6 +105,7 @@ export default function App() {
             <span className="tb-icon">
               <Icon d={ICONS[t]} />
               {!!badge && <span className={`tb-badge ${t === 'mesas' ? 'ok' : ''}`}>{badge}</span>}
+              {t === 'config' && <SyncDot />}
             </span>
             <span className="tb-label">{label}</span>
           </button>

@@ -1,19 +1,24 @@
 import { useState } from 'react';
-import { clp, dayKey, summarize } from '../domain/calc';
+import { clp, dayKey } from '../domain/calc';
 import { demoState } from '../domain/demo';
 import { seedState } from '../domain/seed';
 import { uid } from '../domain/store';
 import type { AppState, Category, ChoiceGroup, Option, Product, Settings, Station, TableDef } from '../domain/types';
 import { STATION_LABEL } from '../domain/types';
 import { canPrint, useAction, useAppState, useStore, useUi, useWide } from '../state';
-import { downloadFile, MoneyField, PinPad, Segmented, Sheet, Stepper, toCsv } from './kit';
+import { downloadFile, MoneyField, PinPad, Segmented, Sheet, Stepper } from './kit';
 import { FlavorsEditor } from './TableView';
+import { CashCountView, ClosesView, FinanceView, TipsView } from './Finance';
+import { LedgerView } from './Ledger';
+import { PeopleAdmin, PromotionsAdmin } from './People';
+import { Reports } from './Reports';
+import { SyncAdmin } from './Sync';
 
-type Section = 'home' | 'reportes' | 'carta' | 'mesas' | 'ajustes' | 'datos';
+type Section = 'home' | 'finanzas' | 'cuadratura' | 'cierres' | 'propinas' | 'reportes' | 'contador' | 'carta' | 'promos' | 'mesas' | 'personas' | 'ajustes' | 'datos';
 
 export function Admin() {
   const store = useStore();
-  const { isAdmin, setAdmin, toast } = useUi();
+  const { isAdmin, setAdmin, toast, adminName } = useUi();
   const [error, setError] = useState('');
   const [section, setSection] = useState<Section>('home');
   const wide = useWide();
@@ -22,16 +27,17 @@ export function Admin() {
     return (
       <div className="screen screen-pin">
         <header className="large-title center">
-          <h1>Modo administrador</h1>
-          <p className="subtitle">Ingresa el PIN para ver reportes, editar el menú, las mesas y los turnos.</p>
+          <h1>Administración</h1>
+          <p className="subtitle">Ingresa tu PIN para ver finanzas, reportes, cierres y editar el menú.</p>
         </header>
         <PinPad
           error={error}
           onSubmit={(pin) => {
-            if (store.checkPin(pin)) {
+            const admin = store.checkPin(pin);
+            if (admin) {
               setError('');
-              setAdmin(true);
-              toast('Modo administrador activo');
+              setAdmin(admin.name);
+              toast(`Hola, ${admin.name}`);
             } else {
               setError('PIN incorrecto');
               navigator.vibrate?.([20, 40, 20]);
@@ -43,52 +49,74 @@ export function Admin() {
     );
   }
 
-  const titles: Record<Exclude<Section, 'home'>, string> = {
-    reportes: 'Reportes',
-    carta: 'Menú',
-    mesas: 'Mesas',
-    ajustes: 'Turnos, cobro y PIN',
-    datos: 'Datos y respaldo',
-  };
+  const items: { s: Exclude<Section, 'home'>; title: string; sub: string; group: string }[] = [
+    { s: 'finanzas', title: 'Finanzas', sub: 'Saldos, compromisos, préstamos y traspasos', group: 'Dinero' },
+    { s: 'cuadratura', title: 'Cuadratura', sub: 'Compara lo que hay con lo esperado', group: 'Dinero' },
+    { s: 'cierres', title: 'Cierres de turno', sub: 'Cierre AM y PM, y cierres anteriores', group: 'Dinero' },
+    { s: 'propinas', title: 'Propinas', sub: 'Acumuladas, pendientes y entregas', group: 'Dinero' },
+    { s: 'reportes', title: 'Reportes', sub: 'Ventas, gastos, resultado y gráficos', group: 'Dinero' },
+    { s: 'contador', title: 'Excel del contador', sub: 'Exportar movimientos e importar historial', group: 'Dinero' },
+    { s: 'carta', title: 'Menú', sub: 'Productos, precios, extras y disponibilidad', group: 'Local' },
+    { s: 'promos', title: 'Promociones', sub: 'Descuentos para aplicar en las cuentas', group: 'Local' },
+    { s: 'mesas', title: 'Mesas', sub: 'Agregar, renombrar, ordenar o quitar mesas', group: 'Local' },
+    { s: 'personas', title: 'Personas y registro', sub: 'Perfiles, PIN y quién cambió qué', group: 'Sistema' },
+    { s: 'ajustes', title: 'Ajustes', sub: 'Turnos, propina, comisiones y listas del contador', group: 'Sistema' },
+    { s: 'datos', title: 'Datos, respaldo y sincronización', sub: 'Respaldos, equipos conectados y datos de prueba', group: 'Sistema' },
+  ];
+  const titles = Object.fromEntries(items.map((i) => [i.s, i.title])) as Record<Exclude<Section, 'home'>, string>;
   const content = (s: Exclude<Section, 'home'>) => (
     <>
+      {s === 'finanzas' && <FinanceView />}
+      {s === 'cuadratura' && <CashCountView />}
+      {s === 'cierres' && <ClosesView />}
+      {s === 'propinas' && <TipsView />}
       {s === 'reportes' && <Reports />}
+      {s === 'contador' && <LedgerView />}
       {s === 'carta' && <MenuAdmin />}
+      {s === 'promos' && <PromotionsAdmin />}
       {s === 'mesas' && <TablesAdmin />}
+      {s === 'personas' && <PeopleAdmin />}
       {s === 'ajustes' && <SettingsAdmin />}
       {s === 'datos' && <DataAdmin />}
     </>
   );
-  const items: { s: Exclude<Section, 'home'>; title: string; sub: string }[] = [
-    { s: 'reportes', title: 'Reportes', sub: 'Ventas por día, turno, estación y producto' },
-    { s: 'carta', title: 'Menú', sub: 'Productos, precios, extras, agotados y estación' },
-    { s: 'mesas', title: 'Mesas', sub: 'Agregar, renombrar, ordenar o quitar mesas' },
-    { s: 'ajustes', title: 'Turnos, cobro y PIN', sub: 'Hora de cambio de turno, propina, medios de pago' },
-    { s: 'datos', title: 'Datos y respaldo', sub: 'Datos de prueba, respaldo y empezar de cero' },
-  ];
-
-  // En el computador: lista de secciones a la izquierda y la sección abierta a la derecha.
-  if (wide) {
-    const cur = section === 'home' ? 'reportes' : section;
-    return (
-      <div className="screen admin-split">
-        <aside className="admin-side">
-          <header className="large-title">
-            <h1>Configurar</h1>
-            <p className="subtitle">Modo administrador</p>
-          </header>
-          <ul className="list nav-list">
-            {items.map((i) => (
+  const navList = (cur?: Section) =>
+    [...new Set(items.map((i) => i.group))].map((g) => (
+      <section key={g} className="nav-group">
+        <h2 className="group-title">{g}</h2>
+        <ul className="list nav-list">
+          {items
+            .filter((i) => i.group === g)
+            .map((i) => (
               <li key={i.s}>
                 <button className={`row-btn ${cur === i.s ? 'on' : ''}`} aria-current={cur === i.s ? 'page' : undefined} onClick={() => setSection(i.s)}>
                   <span className="row-main">
                     <span className="row-title">{i.title}</span>
                     <span className="row-sub">{i.sub}</span>
                   </span>
+                  {!wide && (
+                    <span className="chev" aria-hidden>
+                      ›
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
-          </ul>
+        </ul>
+      </section>
+    ));
+
+  // En el computador: lista de secciones a la izquierda y la sección abierta a la derecha.
+  if (wide) {
+    const cur = section === 'home' ? 'finanzas' : section;
+    return (
+      <div className="screen admin-split">
+        <aside className="admin-side">
+          <header className="large-title">
+            <h1>Administración</h1>
+            <p className="subtitle">{adminName}</p>
+          </header>
+          {navList(cur)}
           <div className="actions">
             <button className="btn-secondary wide" onClick={() => setAdmin(false)}>
               Salir del modo administrador
@@ -110,7 +138,7 @@ export function Admin() {
       <div className="screen">
         <header className="nav-bar">
           <button className="back" onClick={() => setSection('home')}>
-            <span aria-hidden>‹</span> Configurar
+            <span aria-hidden>‹</span> Administración
           </button>
           <div className="nav-title">
             <strong>{titles[section]}</strong>
@@ -125,178 +153,15 @@ export function Admin() {
   return (
     <div className="screen">
       <header className="large-title">
-        <h1>Configurar</h1>
-        <p className="subtitle">Modo administrador · ves y editas todos los datos</p>
+        <h1>Administración</h1>
+        <p className="subtitle">{adminName} · ves y editas todos los datos</p>
       </header>
-      <ul className="list nav-list">
-        {items.map((i) => (
-          <li key={i.s}>
-            <button className="row-btn" onClick={() => setSection(i.s)}>
-              <span className="row-main">
-                <span className="row-title">{i.title}</span>
-                <span className="row-sub">{i.sub}</span>
-              </span>
-              <span className="chev" aria-hidden>
-                ›
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {navList()}
       <div className="actions">
         <button className="btn-secondary wide" onClick={() => setAdmin(false)}>
           Salir del modo administrador
         </button>
       </div>
-    </div>
-  );
-}
-
-// ---------------- Reportes ----------------
-type Range = 'hoy' | '7d' | '30d' | 'mes';
-
-function Reports() {
-  const state = useAppState();
-  const [range, setRange] = useState<Range>('7d');
-  const today = new Date();
-  const back = (n: number) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - n);
-    return dayKey(d);
-  };
-  const from = range === 'hoy' ? dayKey(today) : range === '7d' ? back(6) : range === '30d' ? back(29) : dayKey(new Date(today.getFullYear(), today.getMonth(), 1));
-  const to = dayKey(today);
-  const s = summarize(state, from, to);
-  const maxDay = Math.max(1, ...s.byDay.map((d) => d.total));
-  const stationTotal = s.byStation.reduce((a, b) => a + b.total, 0) || 1;
-
-  return (
-    <div className="admin-pad">
-      <Segmented<Range>
-        label="Período"
-        value={range}
-        onChange={setRange}
-        options={[
-          { value: 'hoy', label: 'Hoy' },
-          { value: '7d', label: '7 días' },
-          { value: '30d', label: '30 días' },
-          { value: 'mes', label: 'Este mes' },
-        ]}
-      />
-      <div className="kpis">
-        <div className="kpi kpi-lead">
-          <span>Consumo</span>
-          <strong>{clp(s.total)}</strong>
-          <small>
-            neto {clp(s.neto)} · IVA {clp(s.iva)}
-          </small>
-        </div>
-        <div className="kpi">
-          <span>Cuentas</span>
-          <strong>{s.count}</strong>
-          <small>{s.voided ? `${s.voided} anuladas` : 'sin anulaciones'}</small>
-        </div>
-        <div className="kpi">
-          <span>Ticket promedio</span>
-          <strong>{clp(s.avg)}</strong>
-        </div>
-        <div className="kpi">
-          <span>Propinas</span>
-          <strong>{clp(s.tips)}</strong>
-        </div>
-      </div>
-
-      {s.byDay.length > 1 && (
-        <section className="group">
-          <h2 className="group-title">Por día</h2>
-          <div className="bars">
-            {s.byDay.map((d) => (
-              <div key={d.day} className="bar-row">
-                <span className="bar-label">{new Date(d.day + 'T12:00').toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric' })}</span>
-                <span className="bar-track">
-                  <span className="bar" style={{ width: `${(d.total / maxDay) * 100}%` }} />
-                </span>
-                <span className="bar-val">{clp(d.total)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <div className="split">
-        <section className="group">
-          <h2 className="group-title">Por turno</h2>
-          <ul className="list">
-            {s.byTurno.map((t) => (
-              <li key={t.turno} className="kv">
-                <span className="cap">{t.turno}</span>
-                <span className="muted">{t.count} cuentas</span>
-                <strong>{clp(t.total)}</strong>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="group">
-          <h2 className="group-title">Por estación</h2>
-          <ul className="list">
-            {s.byStation.map((t) => (
-              <li key={t.station} className="kv">
-                <span>{STATION_LABEL[t.station as Station]}</span>
-                <span className="muted">{Math.round((t.total / stationTotal) * 100)}%</span>
-                <strong>{clp(t.total)}</strong>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="group">
-          <h2 className="group-title">Por medio de pago</h2>
-          <ul className="list">
-            {s.byMethod.map((m) => (
-              <li key={m.method} className="kv">
-                <span>{m.method}</span>
-                <span className="muted">{m.count}</span>
-                <strong>{clp(m.amount)}</strong>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </div>
-
-      <section className="group">
-        <h2 className="group-title">Más vendidos</h2>
-        <ol className="list rank">
-          {s.products.slice(0, 10).map((p) => (
-            <li key={p.name} className="kv">
-              <span>{p.name}</span>
-              <span className="muted">{p.qty} u.</span>
-              <strong>{clp(p.total)}</strong>
-            </li>
-          ))}
-        </ol>
-      </section>
-      <section className="group">
-        <h2 className="group-title">Menos vendidos</h2>
-        <ul className="list">
-          {[...s.products]
-            .reverse()
-            .slice(0, 5)
-            .map((p) => (
-              <li key={p.name} className="kv">
-                <span>{p.name}</span>
-                <span className="muted">{p.qty} u.</span>
-                <strong>{clp(p.total)}</strong>
-              </li>
-            ))}
-        </ul>
-      </section>
-      {canPrint && (
-        <button
-          className="btn-secondary wide"
-          onClick={() => downloadFile(`productos_${from}_${to}.csv`, toCsv([['Producto', 'Unidades', 'Total'], ...s.products.map((p) => [p.name, p.qty, p.total])]))}
-        >
-          Descargar productos (CSV)
-        </button>
-      )}
     </div>
   );
 }
@@ -331,7 +196,7 @@ function MenuAdmin() {
         <FlavorsEditor />
       </details>
       <input className="search admin-search" type="search" placeholder="Buscar producto" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar producto" />
-      <p className="hint">Toca un producto para cambiar su nombre, precio o extras, o para quitarlo. Toca el nombre de una categoría para editarla.</p>
+      <p className="hint">Toca un producto para cambiar nombre, descripción, precio o extras, o para eliminarlo. Usa el interruptor para activarlo o desactivarlo según disponibilidad. Toca el nombre de una categoría para editarla y darle extras compartidos (ej. agregados del gohan).</p>
       {cats.map((c) => (
         <section key={c.id} className="group" hidden={!!q.trim() && !state.products.some((p) => p.categoryId === c.id && !p.archived && match(p))}>
           <h2 className="group-title">
@@ -355,9 +220,9 @@ function MenuAdmin() {
                     </span>
                   </button>
                   {p.variants.length === 0 && <InlinePrice key={p.price} product={p} />}
-                  <label className="switch" title="Agotado">
-                    <input type="checkbox" checked={p.soldOut} onChange={(e) => run(() => store.setSoldOut(isAdmin, p.id, e.target.checked))} aria-label={`${p.name} agotado`} />
-                    <span>Agotado</span>
+                  <label className="switch" title="Disponible para pedir">
+                    <input type="checkbox" checked={!p.soldOut} onChange={(e) => run(() => store.setSoldOut(isAdmin, p.id, !e.target.checked))} aria-label={`${p.name} disponible`} />
+                    <span>{p.soldOut ? 'No disponible' : 'Disponible'}</span>
                   </label>
                 </li>
               ))}
@@ -447,7 +312,7 @@ function CategorySheet({ cat, onClose, onSave, onDelete }: { cat: Category; onCl
       title={cat.name ? 'Editar categoría' : 'Nueva categoría'}
       onClose={onClose}
       footer={
-        <button className="btn-primary wide" onClick={() => onSave({ ...c, name: c.name.trim() })}>
+        <button className="btn-primary wide" onClick={() => onSave({ ...c, name: c.name.trim(), extras: (c.extras ?? []).filter((x) => x.name.trim()).length ? c.extras!.filter((x) => x.name.trim()) : undefined })}>
           Guardar
         </button>
       }
@@ -469,6 +334,13 @@ function CategorySheet({ cat, onClose, onSave, onDelete }: { cat: Category; onCl
         />
         <p className="hint">Los productos de esta categoría se envían a esa comanda.</p>
       </fieldset>
+      <OptionEditor
+        prefix="catx"
+        label="Extras de toda la categoría"
+        hint="Se ofrecen en todos sus productos, además de los extras propios de cada uno. Ej: palta +$1.000, salmón +$2.500."
+        items={c.extras ?? []}
+        onChange={(extras) => setC({ ...c, extras })}
+      />
       {onDelete && (
         <button className="btn-plain danger" onClick={onDelete}>
           Eliminar categoría
@@ -619,8 +491,11 @@ function ProductSheet({ product, categories, onClose, onSave, onRemove }: { prod
       </fieldset>
       {onRemove && (
         <button className="btn-plain danger" onClick={onRemove}>
-          Quitar del menú
+          Eliminar producto
         </button>
+      )}
+      {onRemove && (
+        <p className="hint">Si ya tiene ventas, se archiva para no perder los reportes y puedes devolverlo al menú.</p>
       )}
     </Sheet>
   );
@@ -684,13 +559,35 @@ function TablesAdmin() {
 }
 
 // ---------------- Ajustes ----------------
+function ListField({ id, label, value, onChange, hint }: { id: string; label: string; value: string[]; onChange(v: string[]): void; hint?: string }) {
+  return (
+    <label className="field" htmlFor={id}>
+      <span>{label}</span>
+      <textarea
+        id={id}
+        rows={Math.max(3, value.length + 1)}
+        defaultValue={value.join('\n')}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split('\n')
+              .map((x) => x.trim())
+              .filter(Boolean),
+          )
+        }
+      />
+      {hint && <small className="hint">{hint}</small>}
+    </label>
+  );
+}
+
 function SettingsAdmin() {
   const state = useAppState();
   const store = useStore();
   const run = useAction();
   const { isAdmin } = useUi();
   const [s, setS] = useState<Settings>(state.settings);
-  const [methods, setMethods] = useState(state.settings.paymentMethods.join(', '));
+  const pct = (v: string) => Math.min(19, Number(v.replace(',', '.').replace(/[^\d.]/g, '')) || 0);
   const text = (k: 'businessName' | 'address' | 'phone' | 'footer', label: string) => (
     <label className="field" htmlFor={`set-${k}`}>
       <span>{label}</span>
@@ -702,7 +599,7 @@ function SettingsAdmin() {
       <section className="group">
         <h2 className="group-title">Turnos</h2>
         <label className="field" htmlFor="set-turno">
-          <span>El turno de la tarde empieza a las</span>
+          <span>El turno PM (tarde) empieza a las</span>
           <select id="set-turno" value={s.afternoonStartsAt} onChange={(e) => setS({ ...s, afternoonStartsAt: Number(e.target.value) })}>
             {Array.from({ length: 12 }, (_, i) => i + 10).map((h) => (
               <option key={h} value={h}>
@@ -711,18 +608,38 @@ function SettingsAdmin() {
             ))}
           </select>
         </label>
-        <p className="hint">Cada detalle de cuenta queda en el turno de la hora en que se emite.</p>
+        <p className="hint">Cada venta queda en el turno AM o PM de la hora en que se cobra.</p>
       </section>
       <section className="group">
-        <h2 className="group-title">Cobro</h2>
+        <h2 className="group-title">Propina</h2>
         <label className="field" htmlFor="set-tip">
           <span>Propina sugerida (%)</span>
           <input id="set-tip" inputMode="numeric" value={s.tipPercent} onChange={(e) => setS({ ...s, tipPercent: Math.min(30, Number(e.target.value.replace(/\D/g, '') || 0)) })} />
         </label>
-        <label className="field" htmlFor="set-methods">
-          <span>Medios de pago (separados por coma)</span>
-          <input id="set-methods" value={methods} onChange={(e) => setMethods(e.target.value)} />
+        <label className="toggle">
+          <input type="checkbox" checked={!!s.tipFeeFromTip} onChange={(e) => setS({ ...s, tipFeeFromTip: e.target.checked || undefined })} />
+          <span>Descontar de la propina la comisión de su parte pagada con tarjeta</span>
         </label>
+      </section>
+      <section className="group">
+        <h2 className="group-title">Comisiones de Mercado Pago</h2>
+        <p className="hint">Porcentaje con IVA incluido y días que demora el abono en llegar al banco. Revisa tu plan en Mercado Pago.</p>
+        <div className="fee-grid">
+          <span />
+          <strong>Comisión %</strong>
+          <strong>Días de abono</strong>
+          {(['debito', 'credito'] as const).map((m) => (
+            <FeeRow key={m} label={m === 'debito' ? 'Débito' : 'Crédito'} fee={s.fees[m]} days={s.settleDays[m]} onFee={(v) => setS({ ...s, fees: { ...s.fees, [m]: pct(v) } })} onDays={(d) => setS({ ...s, settleDays: { ...s.settleDays, [m]: d } })} />
+          ))}
+          <FeeRow label="Transferencia" fee={s.fees.transferencia} onFee={(v) => setS({ ...s, fees: { ...s.fees, transferencia: pct(v) } })} />
+        </div>
+      </section>
+      <section className="group">
+        <h2 className="group-title">Listas del contador</h2>
+        <p className="hint">Una por línea, escritas exactamente como en el Excel «Control Gastos JJA SPA».</p>
+        <ListField id="set-cats" label="Categorías de gasto" value={s.expenseCategories} onChange={(expenseCategories) => setS({ ...s, expenseCategories })} />
+        <ListField id="set-methods" label="Métodos de pago" value={s.expenseMethods} onChange={(expenseMethods) => setS({ ...s, expenseMethods })} />
+        <ListField id="set-docs" label="Tipos de documento" value={s.docTypes} onChange={(docTypes) => setS({ ...s, docTypes })} />
       </section>
       <section className="group">
         <h2 className="group-title">Detalle de cuenta</h2>
@@ -735,32 +652,33 @@ function SettingsAdmin() {
         {text('phone', 'Teléfono o Instagram')}
         {text('footer', 'Texto al pie')}
       </section>
-      <section className="group">
-        <h2 className="group-title">PIN de administración</h2>
-        <label className="field" htmlFor="set-pin">
-          <span>De 4 a 6 números</span>
-          <input id="set-pin" inputMode="numeric" value={s.adminPin} onChange={(e) => setS({ ...s, adminPin: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
-        </label>
-      </section>
-      <button
-        className="btn-primary wide"
-        onClick={() =>
-          run(
-            () =>
-              store.saveSettings(isAdmin, {
-                ...s,
-                paymentMethods: methods
-                  .split(',')
-                  .map((m) => m.trim())
-                  .filter(Boolean),
-              }),
-            'Cambios guardados',
-          )
-        }
-      >
+      <button className="btn-primary wide" onClick={() => run(() => store.saveSettings(isAdmin, s), 'Cambios guardados')}>
         Guardar cambios
       </button>
     </div>
+  );
+}
+
+function FeeRow({ label, fee, days, onFee, onDays }: { label: string; fee: number; days?: number; onFee(v: string): void; onDays?(d: number): void }) {
+  const [v, setV] = useState(String(fee).replace('.', ','));
+  return (
+    <>
+      <span>{label}</span>
+      <input
+        aria-label={`Comisión ${label}`}
+        inputMode="decimal"
+        value={v}
+        onChange={(e) => {
+          setV(e.target.value);
+          onFee(e.target.value);
+        }}
+      />
+      {onDays ? (
+        <input aria-label={`Días de abono ${label}`} inputMode="numeric" value={days ?? 0} onChange={(e) => onDays(Math.min(60, Number(e.target.value.replace(/\D/g, '') || 0)))} />
+      ) : (
+        <span className="muted">al momento</span>
+      )}
+    </>
   );
 }
 
@@ -776,6 +694,7 @@ function DataAdmin() {
   };
   return (
     <div className="admin-pad">
+      <SyncAdmin />
       <section className="group">
         <h2 className="group-title">Datos de prueba</h2>
         <p className="hint">Carga un mes de cuentas de ejemplo con mesas abiertas y comandas en cocina, o deja la app vacía con el menú base. Reemplaza todo lo que hay en este equipo.</p>
