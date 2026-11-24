@@ -95,6 +95,13 @@ jobs:
             vercel build --token "$VERCEL_TOKEN"
           fi
 
+      - name: Revisar que el build trae Supabase
+        run: |
+          if ! grep -rqs "$VITE_SUPABASE_URL" .vercel/output/static; then
+            echo "::error::El build no incluye la dirección de Supabase"
+            exit 1
+          fi
+
       - name: Deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
