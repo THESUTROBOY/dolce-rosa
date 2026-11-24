@@ -1,5 +1,5 @@
-import { accountDue, accountSubtotal, accountTotal, clp, discountOf, fmtDay, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
-import { paymentsOf, shiftSummary } from './domain/money';
+import { accountDue, accountSubtotal, accountTotal, clp, discountOf, fmtDay, folioLabel, lineTotal, suggestedTip } from './domain/calc';
+import { shiftSummary } from './domain/money';
 import type { Account, Comanda, PayMethod, Settings, ShiftClose } from './domain/types';
 import { PAY_LABEL, STATION_LABEL, TURNO_LABEL } from './domain/types';
 
@@ -12,13 +12,11 @@ h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}.r{display:fle
 
 export function accountHtml(a: Account, s: Settings) {
   const total = accountTotal(a);
-  const { neto, iva } = netAndTax(total);
   const lines = a.lines
     .map(
       (l) =>
         `<div class="r"><span>${l.qty} x ${esc([l.name, l.variant].filter(Boolean).join(' '))}</span><span>${clp(lineTotal(l))}</span></div>` +
-        (l.extras.length ? `<div class="n">+ ${l.extras.map(esc).join(', ')}</div>` : '') +
-        (l.choices?.length ? `<div class="n">${l.choices.map(esc).join(' · ')}</div>` : ''),
+        (l.extras.length ? `<div class="n">+ ${l.extras.map(esc).join(', ')}</div>` : ''),
     )
     .join('');
   return `<style>${PAGE}</style><h1>${esc(s.businessName)}</h1>
@@ -28,21 +26,17 @@ export function accountHtml(a: Account, s: Settings) {
   ${lines}<hr>
   ${
     a.discounts?.length
-      ? `<div class="r"><span>Subtotal</span><span>${clp(accountSubtotal(a))}</span></div>` +
+      ? `<div class="r"><span>Consumo</span><span>${clp(accountSubtotal(a))}</span></div>` +
         a.discounts.map((d) => `<div class="r"><span>${esc(d.name)}</span><span>-${clp(discountOf(d, a.lines))}</span></div>`).join('')
       : ''
   }
-  <div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>
-  <div class="r s"><span>Neto ${clp(neto)}</span><span>IVA ${clp(iva)}</span></div>
+  <div class="r"><span>SUBTOTAL</span><span>${clp(total)}</span></div>
   ${
     a.paidAt
-      ? (a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div><div class="r b"><span>PAGADO</span><span>${clp(accountDue(a))}</span></div>` : '') +
-        paymentsOf(a)
-          .map((p) => `<div class="r"><span>${PAY_LABEL[p.method]}</span><span>${clp(p.amount)}</span></div>`)
-          .join('')
+      ? (a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div>` : '') + `<div class="r b"><span>TOTAL</span><span>${clp(accountDue(a))}</span></div>`
       : s.tipPercent > 0
-        ? `<hr><div class="r"><span>Propina sugerida ${s.tipPercent}%</span><span>${clp(suggestedTip(total, s.tipPercent))}</span></div><div class="r b"><span>TOTAL CON PROPINA</span><span>${clp(total + suggestedTip(total, s.tipPercent))}</span></div>`
-        : ''
+        ? `<div class="r"><span>Propina sugerida ${s.tipPercent}%</span><span>${clp(suggestedTip(total, s.tipPercent))}</span></div><div class="r b"><span>TOTAL</span><span>${clp(total + suggestedTip(total, s.tipPercent))}</span></div>`
+        : `<div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>`
   }
   <hr><div class="c s">${esc(s.footer)}</div>`;
 }
