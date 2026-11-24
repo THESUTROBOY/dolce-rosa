@@ -18,6 +18,10 @@ concurrency:
 
 env:
   VERCEL_PROJECT: dolce-rosa
+  # Supabase de Dolce Rosa (sincroniza los equipos). La clave publishable es
+  # pública por diseño: la protección real son las políticas RLS y el login.
+  VITE_SUPABASE_URL: https://ozaxfwgaoeffrlsiqsiu.supabase.co
+  VITE_SUPABASE_KEY: sb_publishable_o5LuIDmMs5e7sR7X-NdD3Q_rhFC169P
   TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
 
 jobs:
