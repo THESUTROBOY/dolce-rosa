@@ -11,7 +11,7 @@ npm test         # pruebas del flujo de mesas, comandas y cobro
 npm run build    # genera dist/ para publicar como sitio estático
 ```
 
-PIN de administración de prueba: `1234` (se cambia en Configurar).
+El PIN de administración se cambia en Configurar.
 
 ## Cómo se usa
 

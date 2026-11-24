@@ -44,7 +44,6 @@ export function Admin() {
             }
           }}
         />
-        <p className="hint center">PIN de prueba: 1234</p>
       </div>
     );
   }
