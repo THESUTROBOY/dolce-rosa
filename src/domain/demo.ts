@@ -1,6 +1,8 @@
-import { accountTotal, dayKey, scoopsFor, suggestedTip, turnoOf } from './calc';
+import { accountTotal, addDays, dayKey, scoopsFor, suggestedTip, turnoOf, weekOf } from './calc';
+import { EXPENSE_CATEGORIES } from './defaults';
+import { bucketOf, makePayment, methodsLabel, shiftReport, splitTip } from './money';
 import { seedState } from './seed';
-import type { Account, AppState, Comanda, Line, Option, Product, Station } from './types';
+import type { Account, AppState, Comanda, Expense, Line, Option, PayMethod, Product, Station, TipPayout } from './types';
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -75,9 +77,9 @@ export function demoState(now = new Date()): AppState {
   today.setHours(0, 0, 0, 0);
   const accounts: Account[] = [];
   const comandas: Comanda[] = [];
-  const method = () => {
+  const method = (): PayMethod => {
     const x = r();
-    return x < 0.28 ? 'Efectivo' : x < 0.62 ? 'Débito' : x < 0.85 ? 'Crédito' : 'Transferencia';
+    return x < 0.28 ? 'efectivo' : x < 0.62 ? 'debito' : x < 0.85 ? 'credito' : 'transferencia';
   };
 
   let boleta = 41200;
@@ -105,10 +107,18 @@ export function demoState(now = new Date()): AppState {
         paidAt: new Date(close.getTime() + (2 + r() * 6) * 60000).toISOString(),
         day: dayKey(close),
         turno: turnoOf(close, s.settings.afternoonStartsAt),
+        payDay: dayKey(close),
+        payTurno: turnoOf(close, s.settings.afternoonStartsAt),
         tip: 0,
-        paymentMethod: method(),
       };
       if (t.name !== 'Para llevar' && r() < 0.7) a.tip = suggestedTip(accountTotal(a), s.settings.tipPercent);
+      // Uno de cada diez paga combinado: parte en efectivo y el resto con tarjeta.
+      const due = accountTotal(a) + a.tip;
+      const parts: [PayMethod, number][] = r() < 0.1 ? [['efectivo', Math.round((due * 0.4) / 1000) * 1000 || 1000], ['debito', 0]] : [[method(), due]];
+      if (parts.length === 2) parts[1][1] = due - parts[0][1];
+      const tips = splitTip(parts.map((x) => x[1]), a.tip);
+      a.payments = parts.filter((x) => x[1] > 0).map(([m, amt], i) => makePayment(m, amt, tips[i], a.day!, s.settings, back > 1 || r() < 0.7));
+      a.paymentMethod = methodsLabel(a.payments);
       // Casi todo lo pasado ya está cuadrado con su boleta; hoy queda la mitad por revisar.
       a.boleta = String(boleta++);
       a.checked = back > 0 ? r() < 0.97 : r() < 0.5;
@@ -117,6 +127,8 @@ export function demoState(now = new Date()): AppState {
         a.voidReason = pick(['Cliente se fue sin consumir', 'Mesa ingresada por error']);
         a.voidedAt = close.toISOString();
         a.boleta = undefined;
+        a.paidAt = a.payments = a.paymentMethod = undefined;
+        a.tip = 0;
       }
       accounts.push(a);
       for (const st of ['cocina', 'barra'] as Station[]) {
@@ -206,5 +218,92 @@ export function demoState(now = new Date()): AppState {
   emitted.forEach((a, i) => (a.folio = i + 1));
   s.nextFolio = emitted.length + 1;
   s.nextComanda = comandas.length + 1;
+
+  // Finanzas: saldos al inicio del mes de prueba, gastos, propinas entregadas y algún movimiento.
+  const first = dayKey(new Date(today.getTime() - 30 * 86400000));
+  Object.assign(s.settings, { openingCash: 150000, openingBank: 1800000, openingDate: first });
+  const [arriendo, sueldos, software, insumos, envases, marketing, , mantencion] = EXPENSE_CATEGORIES;
+  const expenses: Expense[] = [];
+  const gasto = (date: string, description: string, category: string, amount: number, fund: Expense['fund'], docType = 'Boleta') =>
+    expenses.push({
+      id: id('gas'),
+      date,
+      description,
+      category,
+      amount,
+      method: fund === 'efectivo' ? 'Efectivo' : 'Transferencia',
+      fund,
+      docType,
+      notes: '',
+      createdAt: new Date(date + 'T10:30:00').toISOString(),
+      by: 'Administración',
+    });
+  for (let back = 30; back >= 0; back--) {
+    const day = dayKey(new Date(today.getTime() - back * 86400000));
+    const dom = new Date(day + 'T12:00').getDate();
+    const wd = new Date(day + 'T12:00').getDay();
+    if (dom === 1) {
+      gasto(day, 'Arriendo local', arriendo, 950000, 'banco', 'Factura');
+      gasto(day, 'Suscripción Canva y software', software, 24990, 'banco', 'Factura');
+    }
+    if (dom === 5) gasto(day, 'Luz y agua', arriendo, 138400, 'banco', 'Factura');
+    if (dom === 30 || (dom === 28 && new Date(day + 'T12:00').getMonth() === 1)) gasto(day, 'Sueldos', sueldos, 1450000, 'banco', 'Sin documento');
+    if (wd === 2) gasto(day, 'Mercadería distribuidora', insumos, 180000 + Math.round(r() * 60000), 'banco', 'Factura');
+    if (wd === 4 || wd === 6) gasto(day, pick(['Leche y crema', 'Frutillas y plátanos', 'Pan Selezione', 'Huevos y palta']), insumos, 12000 + Math.round(r() * 20) * 1000, 'efectivo');
+    if (wd === 3 && r() < 0.5) gasto(day, 'Vasos y bolsas para llevar', envases, 32990, 'banco', 'Factura');
+    if (dom === 15) gasto(day, 'Publicidad Instagram', marketing, 40000, 'banco', 'Factura');
+    if (dom === 20) gasto(day, 'Mantención máquina de café', mantencion, 65000, 'efectivo', 'Boleta');
+  }
+  s.expenses = expenses;
+  // Propinas entregadas cada lunes de las semanas ya cerradas.
+  const payouts: TipPayout[] = [];
+  const weekTips = new Map<string, { lv: number; sd: number }>();
+  for (const a of accounts) {
+    if (!a.paidAt || !a.tip || a.status !== 'emitida') continue;
+    const w = weekOf(a.payDay!);
+    const v = weekTips.get(w) ?? { lv: 0, sd: 0 };
+    v[bucketOf(a.payDay!)] += a.tip;
+    weekTips.set(w, v);
+  }
+  const thisWeek = weekOf(dayKey(today));
+  for (const [week, v] of weekTips) {
+    if (week >= thisWeek) continue;
+    const date = addDays(week, 7);
+    for (const bucket of ['lv', 'sd'] as const)
+      if (v[bucket]) payouts.push({ id: id('prp'), date, amount: v[bucket], fund: bucket === 'lv' ? 'banco' : 'efectivo', bucket, week, note: '', createdAt: new Date(date + 'T18:00:00').toISOString(), by: 'Administración' });
+  }
+  s.tipPayouts = payouts;
+  const mid = dayKey(new Date(today.getTime() - 12 * 86400000));
+  // Cada lunes se deposita en el banco casi todo el efectivo de la semana anterior.
+  const cashByWeek = new Map<string, number>();
+  for (const a of accounts)
+    for (const p of a.status === 'emitida' ? (a.payments ?? []) : [])
+      if (p.method === 'efectivo') cashByWeek.set(weekOf(a.payDay!), (cashByWeek.get(weekOf(a.payDay!)) ?? 0) + p.amount);
+  const deposits = [...cashByWeek]
+    .filter(([w]) => w < thisWeek)
+    .map(([w, amt]) => {
+      const date = addDays(w, 7);
+      return { id: id('mov'), date, kind: 'traspaso' as const, amount: Math.floor((amt * 0.8) / 10000) * 10000, fund: 'efectivo' as const, toFund: 'banco' as const, description: 'Depósito de caja', createdAt: new Date(date + 'T19:00:00').toISOString(), by: 'Administración' };
+    });
+  s.movements = [
+    ...deposits,
+    { id: id('mov'), date: mid, kind: 'prestamo_entregado', amount: 50000, fund: 'efectivo', counterpart: 'Proveedor de pasteles', description: 'Adelanto', createdAt: new Date(mid + 'T12:00:00').toISOString(), by: 'Administración' },
+  ];
+  s.reserves = [{ id: id('res'), name: 'Arriendo del próximo mes', amount: 950000 }];
+  s.promotions = [
+    { id: id('pro'), name: 'Café + pastel 10%', kind: 'percent', value: 10, productIds: [], categoryIds: [], active: true },
+    { id: id('pro'), name: 'Martes de waffles −$1.000', kind: 'amount', value: 1000, productIds: s.products.filter((p) => p.categoryId === s.categories.find((c) => c.name === 'Waffles')?.id).map((p) => p.id), categoryIds: [], active: true, weekdays: [2] },
+  ];
+  // Cierres de los turnos ya terminados (menos los de hoy, para probar el cierre).
+  const closeDays = [...new Set(accounts.filter((a) => a.payDay && a.payDay < dayKey(today)).map((a) => a.payDay!))].sort();
+  for (const day of closeDays)
+    for (const turno of ['mañana', 'tarde'] as const) {
+      const report = shiftReport(s, day, turno, new Date(day + 'T23:59:00'));
+      if (!report.sales) continue;
+      const closedAt = new Date(day + (turno === 'mañana' ? 'T15:05:00' : 'T20:10:00')).toISOString();
+      const off = r() < 0.15 ? pick([-2000, -500, 1000]) : 0;
+      s.closes.push({ id: id('cie'), day, turno, closedAt, by: pick(['Camila', 'Fernanda']), report, countedCash: report.cashEnd + off, note: off ? 'Revisar vuelto' : '' });
+    }
+  s.staff.push({ id: id('per'), name: 'Camila', role: 'trabajador', active: true }, { id: id('per'), name: 'Fernanda', role: 'trabajador', active: true });
   return s;
 }

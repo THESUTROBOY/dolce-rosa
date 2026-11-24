@@ -2,12 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { Providers } from './state.tsx';
+import { boot, Providers } from './state.tsx';
 
-createRoot(document.getElementById('root')!).render(
+boot().then(() =>
+  createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Providers>
       <App />
     </Providers>
   </StrictMode>,
+  ),
 );

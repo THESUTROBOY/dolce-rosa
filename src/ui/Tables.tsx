@@ -1,6 +1,8 @@
 import { accountTotal, clp, occupiesTable } from '../domain/calc';
 import type { TableDef } from '../domain/types';
+import { useState } from 'react';
 import { ago, useAction, useAppState, useNow, useStore, useUi } from '../state';
+import { Sheet } from './kit';
 
 type Shape = 'cuadrada' | 'redonda' | 'barra';
 
@@ -27,7 +29,9 @@ const Dusk = () => (
 export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
   const state = useAppState();
   const now = useNow();
-  const { theme, themeIsAuto, toggleTheme } = useUi();
+  const { theme, themeIsAuto, toggleTheme, who, setWho, isAdmin, adminName } = useUi();
+  const [picking, setPicking] = useState(false);
+  const workers = state.staff.filter((p) => p.active);
   const store = useStore();
   const run = useAction();
   const open = state.accounts.filter(occupiesTable);
@@ -42,6 +46,9 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
             {busy === 0 ? 'Todas libres' : `${busy} ${busy === 1 ? 'ocupada' : 'ocupadas'} · ${state.tables.length - busy} libres`}
           </p>
         </div>
+        <button className={`who-chip ${who || isAdmin ? '' : 'empty'}`} onClick={() => setPicking(true)} aria-label="Quién atiende en este equipo">
+          {isAdmin ? adminName : who || 'Atiende…'}
+        </button>
         <button
           className="theme-toggle"
           onClick={toggleTheme}
@@ -51,6 +58,32 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
           <span>{theme === 'dia' ? 'Día' : 'Tarde'}</span>
         </button>
       </header>
+      {picking && (
+        <Sheet title="¿Quién atiende en este equipo?" onClose={() => setPicking(false)}>
+          <p className="hint">Queda registrado en los cobros, gastos y cierres que se hagan desde aquí.</p>
+          <div className="move-grid">
+            {workers.map((p) => (
+              <button
+                key={p.id}
+                className={`btn-secondary ${who === p.name ? 'on' : ''}`}
+                onClick={() => {
+                  setWho(p.name);
+                  setPicking(false);
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <OtherName
+            onSave={(n) => {
+              setWho(n);
+              setPicking(false);
+            }}
+          />
+          {!workers.some((p) => p.role === 'trabajador') && <p className="hint">Administración puede dejar la lista de nombres en Admin → Personas.</p>}
+        </Sheet>
+      )}
       <div className="floor">
         {state.tables.map((t) => {
           const a = open.find((x) => x.tableId === t.id);
@@ -99,5 +132,26 @@ export function Tables({ onOpen }: { onOpen(tableId: string): void }) {
         })}
       </div>
     </div>
+  );
+}
+
+function OtherName({ onSave }: { onSave(n: string): void }) {
+  const [n, setN] = useState('');
+  return (
+    <form
+      className="field-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (n.trim()) onSave(n.trim());
+      }}
+    >
+      <label className="field grow" htmlFor="who-other">
+        <span>Otra persona</span>
+        <input id="who-other" value={n} onChange={(e) => setN(e.target.value)} placeholder="Nombre" />
+      </label>
+      <button className="btn-secondary" disabled={!n.trim()}>
+        Listo
+      </button>
+    </form>
   );
 }

@@ -1,6 +1,7 @@
-import { accountDue, accountTotal, clp, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
-import type { Account, Comanda, Settings } from './domain/types';
-import { STATION_LABEL } from './domain/types';
+import { accountDue, accountSubtotal, accountTotal, clp, discountOf, fmtDay, folioLabel, lineTotal, netAndTax, suggestedTip } from './domain/calc';
+import { paymentsOf, shiftSummary } from './domain/money';
+import type { Account, Comanda, PayMethod, Settings, ShiftClose } from './domain/types';
+import { PAY_LABEL, STATION_LABEL, TURNO_LABEL } from './domain/types';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const when = (iso: string) => new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
@@ -25,12 +26,20 @@ export function accountHtml(a: Account, s: Settings) {
   <hr><div class="c"><b>${a.folio ? `DETALLE DE CUENTA N° ${folioLabel(a.folio)}` : 'PRECUENTA'}</b></div>${a.turno && a.folio ? `<div class="c s">Turno ${a.turno}</div>` : ''}
   <div class="r"><span>${esc(a.tableName)}</span><span>${when(a.emittedAt ?? new Date().toISOString())}</span></div><hr>
   ${lines}<hr>
+  ${
+    a.discounts?.length
+      ? `<div class="r"><span>Subtotal</span><span>${clp(accountSubtotal(a))}</span></div>` +
+        a.discounts.map((d) => `<div class="r"><span>${esc(d.name)}</span><span>-${clp(discountOf(d, a.lines))}</span></div>`).join('')
+      : ''
+  }
   <div class="r b"><span>TOTAL</span><span>${clp(total)}</span></div>
   <div class="r s"><span>Neto ${clp(neto)}</span><span>IVA ${clp(iva)}</span></div>
   ${
     a.paidAt
       ? (a.tip ? `<div class="r"><span>Propina voluntaria</span><span>${clp(a.tip)}</span></div><div class="r b"><span>PAGADO</span><span>${clp(accountDue(a))}</span></div>` : '') +
-        (a.paymentMethod ? `<div class="r"><span>Pago</span><span>${esc(a.paymentMethod)}</span></div>` : '')
+        paymentsOf(a)
+          .map((p) => `<div class="r"><span>${PAY_LABEL[p.method]}</span><span>${clp(p.amount)}</span></div>`)
+          .join('')
       : s.tipPercent > 0
         ? `<hr><div class="r"><span>Propina sugerida ${s.tipPercent}%</span><span>${clp(suggestedTip(total, s.tipPercent))}</span></div><div class="r b"><span>TOTAL CON PROPINA</span><span>${clp(total + suggestedTip(total, s.tipPercent))}</span></div>`
         : ''
@@ -57,4 +66,25 @@ export function printHtml(html: string) {
     f.contentWindow?.print();
     setTimeout(() => f.remove(), 1500);
   }, 60);
+}
+
+const SALES: Record<PayMethod, string> = { efectivo: 'Ventas efectivo', debito: 'Ventas débito', credito: 'Ventas crédito', transferencia: 'Transferencias' };
+
+export function shiftHtml(c: ShiftClose, business: string) {
+  const r = c.report;
+  const x = shiftSummary(r);
+  const row = (a: string, b: string) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
+  return `<style>${PAGE} .big{font-size:22px}</style><div class="c"><b>${esc(business)} | Cierre de turno ${TURNO_LABEL[c.turno]}</b></div>
+  <div class="c s">${fmtDay(c.day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div><div class="c s">Cerró ${esc(c.by)} · ${when(c.closedAt)}</div><hr>
+  ${x.methods.map((m) => row(`${SALES[m.method]} (${m.count})`, clp(m.amount))).join('')}
+  <div class="r b"><span>Total con propinas</span><span>${clp(x.totalWithTips)}</span></div>
+  ${x.tipMethods.map((m) => row(`Propinas ${PAY_LABEL[m.method].toLowerCase()}`, clp(m.tip))).join('')}
+  ${row('Comisiones', clp(x.fees + x.tipFees))}${row('Gastos', clp(x.expenses))}
+  <div class="r b"><span>Total propinas</span><span>${clp(x.tipsForStaff)}</span></div><hr>
+  <div class="c">Saldo líquido del turno</div><div class="c big"><b>${clp(x.liquid)}</b></div>
+  <div class="c s">Ventas sin propina ${clp(r.consumo)} · ${r.sales} cuentas${r.discounts ? ` · descuentos ${clp(r.discounts)}` : ''}</div><hr>
+  ${row('Efectivo inicio', clp(r.cashStart))}${row('Gastos caja', '-' + clp(r.expenses[0].amount))}${row('Gastos banco', '-' + clp(r.expenses[1].amount))}${r.tipPayouts ? row('Propinas entregadas', '-' + clp(r.tipPayouts)) : ''}
+  <div class="r b"><span>Efectivo esperado</span><span>${clp(r.cashEnd)}</span></div>
+  ${c.countedCash !== undefined ? row('Efectivo contado', clp(c.countedCash)) + row('Diferencia', clp(c.countedCash - r.cashEnd)) : ''}
+  ${row('Abonos MP pendientes', clp(r.pendingMp))}${c.note ? `<hr><div class="s">${esc(c.note)}</div>` : ''}<hr>`;
 }
