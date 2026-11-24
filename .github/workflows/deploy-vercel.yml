@@ -1,0 +1,113 @@
+# Publica la app en la cuenta Vercel de Dolce Rosa (la de la dueña).
+# El código sigue en este repo privado; Vercel solo recibe el build.
+# Requiere el secreto de repo VERCEL_TOKEN (token de su cuenta Vercel).
+#   - push a main      -> despliegue de producción
+#   - pull request     -> despliegue de prueba (preview)
+#   - manual           -> producción
+name: Deploy Vercel (cuenta Dolce Rosa)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_PROJECT: dolce-rosa
+  # Supabase de Dolce Rosa (sincroniza los equipos). La clave publishable es
+  # pública por diseño: la protección real son las políticas RLS y el login.
+  VITE_SUPABASE_URL: https://ozaxfwgaoeffrlsiqsiu.supabase.co
+  VITE_SUPABASE_KEY: sb_publishable_o5LuIDmMs5e7sR7X-NdD3Q_rhFC169P
+  TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Revisar secreto
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Falta el secreto VERCEL_TOKEN en Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel
+
+      - name: Crear el proyecto en Vercel si no existe
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT")
+          if [ "$code" = "404" ]; then
+            echo "Creando proyecto $VERCEL_PROJECT"
+            curl -sf -X POST -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\":\"$VERCEL_PROJECT\",\"framework\":\"vite\"}" \
+              https://api.vercel.com/v10/projects > /dev/null
+          elif [ "$code" != "200" ]; then
+            echo "::error::Vercel respondió $code al buscar el proyecto (¿token válido?)"
+            exit 1
+          fi
+
+      - name: Enlazar y traer configuración
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          vercel link --yes --project "$VERCEL_PROJECT" --token "$VERCEL_TOKEN"
+          vercel pull --yes --environment="$TARGET" --token "$VERCEL_TOKEN"
+
+      - name: Comprobar Supabase
+        run: |
+          code=$(curl -s -o /tmp/sb.json -w '%{http_code}' \
+            "$VITE_SUPABASE_URL/rest/v1/records?select=id&limit=1" \
+            -H "apikey: $VITE_SUPABASE_KEY")
+          echo "Supabase records -> HTTP $code: $(head -c 300 /tmp/sb.json)"
+          echo "Supabase (tabla records): HTTP $code" >> "$GITHUB_STEP_SUMMARY"
+          # Sin sesión (anon) lo esperado es 200 con [] o 401 "permission denied": la tabla existe.
+          if [ "$code" = "404" ] || grep -q PGRST205 /tmp/sb.json; then
+            echo "::warning::Falta la tabla records en Supabase. Correr supabase/migrations/*.sql en el SQL Editor."
+          fi
+
+      - name: Build
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            vercel build --prod --token "$VERCEL_TOKEN"
+          else
+            vercel build --token "$VERCEL_TOKEN"
+          fi
+
+      - name: Deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            url=$(vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN")
+          else
+            url=$(vercel deploy --prebuilt --token "$VERCEL_TOKEN")
+          fi
+          echo "Desplegado ($TARGET): $url"
+          echo "### Desplegado ($TARGET): $url" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TARGET" = "production" ]; then
+            alias=$(curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v9/projects/$VERCEL_PROJECT" \
+              | python3 -c 'import sys,json;p=json.load(sys.stdin);print(" ".join(a.get("domain","") for a in p.get("alias",[])) or "")' || true)
+            echo "Dominio de producción: $alias"
+            echo "Dominio de producción: $alias" >> "$GITHUB_STEP_SUMMARY"
+          fi
