@@ -32,7 +32,7 @@ La app no emite boletas SII.
 
 Cada equipo guarda los datos en el navegador (IndexedDB). Para que celulares, tablets y computadores compartan todo:
 
-1. Crear un proyecto en Supabase y correr `supabase/migrations/20261120_sync.sql`.
+1. Crear un proyecto en Supabase y correr, en orden, los archivos de `supabase/migrations/` en el SQL Editor.
 2. Crear un usuario (Authentication → Users) para el local.
 3. Poner `VITE_SUPABASE_URL` y `VITE_SUPABASE_KEY` (clave publishable) en el workflow `.github/workflows/deploy-vercel.yml` (ya están las de Dolce Rosa), o pegarlas en Admin → Datos.
 4. En cada equipo, iniciar sesión una vez con el usuario del local.

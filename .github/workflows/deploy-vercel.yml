@@ -78,8 +78,9 @@ jobs:
             -H "apikey: $VITE_SUPABASE_KEY")
           echo "Supabase records -> HTTP $code: $(head -c 300 /tmp/sb.json)"
           echo "Supabase (tabla records): HTTP $code" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$code" != "200" ]; then
-            echo "::warning::La tabla records no responde (HTTP $code). ¿Se corrió supabase/migrations/20261120_sync.sql?"
+          # Sin sesión (anon) lo esperado es 200 con [] o 401 "permission denied": la tabla existe.
+          if [ "$code" = "404" ] || grep -q PGRST205 /tmp/sb.json; then
+            echo "::warning::Falta la tabla records en Supabase. Correr supabase/migrations/*.sql en el SQL Editor."
           fi
 
       - name: Build
