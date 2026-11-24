@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { accountDiscount, accountDue, accountSubtotal, accountTotal, clp, discountOf, folioLabel, lineTotal, netAndTax, occupiesTable, scoopsFor, suggestedTip } from '../domain/calc';
+import { accountDiscount, accountDue, accountSubtotal, accountTotal, clp, discountOf, folioLabel, lineTotal, occupiesTable, scoopsFor, suggestedTip } from '../domain/calc';
 import { splitTip } from '../domain/money';
 import type { Account, Comanda, Line, PayMethod, Product, Station } from '../domain/types';
 import { PAY_LABEL, PAY_METHODS, STATION_LABEL } from '../domain/types';
@@ -513,7 +513,6 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
     );
   }
   const total = accountTotal(account);
-  const { neto, iva } = netAndTax(total);
   const hasUnsent = account.lines.some((l) => !l.sentAt);
   const pending = account.status === 'emitida';
   const toServe = state.comandas.filter((c) => c.accountId === account.id && c.status !== 'entregado').length;
@@ -548,8 +547,6 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
                   <span>{clp(lineTotal(l))}</span>
                 </div>
                 {l.extras.length > 0 && <div className="rc-sub">+ {l.extras.join(', ')}</div>}
-                {l.choices && <div className="rc-sub">{l.choices.join(' · ')}</div>}
-                {l.note && <div className="rc-sub rc-note">“{l.note}”</div>}
                 <div className="rc-meta">
                   <span className={`pill ${LINE_STATE[st].cls}`}>{LINE_STATE[st].label}</span>
                   {isAdmin && l.sentAt && !pending && (
@@ -566,7 +563,7 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
           {(account.discounts?.length ?? 0) > 0 && (
             <>
               <div className="rc-line">
-                <span>Subtotal</span>
+                <span>Consumo</span>
                 <span>{clp(accountSubtotal(account))}</span>
               </div>
               {account.discounts!.map((d) => (
@@ -582,26 +579,20 @@ function AccountPane({ account, onEmitted, onGoMenu }: { account?: Account; onEm
               ))}
             </>
           )}
-          <div className="rc-line rc-total">
-            <span>Total</span>
+          <div className="rc-line">
+            <span>Subtotal</span>
             <span>{clp(total)}</span>
           </div>
-          <div className="rc-line rc-small">
-            <span>Neto {clp(neto)}</span>
-            <span>IVA {clp(iva)}</span>
-          </div>
           {state.settings.tipPercent > 0 && (
-            <>
-              <div className="rc-line rc-small">
-                <span>Propina sugerida {state.settings.tipPercent}%</span>
-                <span>{clp(suggested)}</span>
-              </div>
-              <div className="rc-line rc-small">
-                <span>Total con propina</span>
-                <span>{clp(total + suggested)}</span>
-              </div>
-            </>
+            <div className="rc-line rc-small">
+              <span>Propina sugerida {state.settings.tipPercent}%</span>
+              <span>{clp(suggested)}</span>
+            </div>
           )}
+          <div className="rc-line rc-total">
+            <span>Total</span>
+            <span>{clp(total + (state.settings.tipPercent > 0 ? suggested : 0))}</span>
+          </div>
         </footer>
       </article>
 

@@ -199,7 +199,6 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
                 <span>{clp(lineTotal(l))}</span>
               </div>
               {l.extras.length > 0 && <div className="rc-sub">+ {l.extras.join(', ')}</div>}
-              {l.choices && <div className="rc-sub">{l.choices.join(' · ')}</div>}
             </li>
           ))}
         </ul>
@@ -211,7 +210,7 @@ function AccountSheet({ id, onClose }: { id: string; onClose(): void }) {
             </div>
           )}
           <div className="rc-line">
-            <span>Consumo</span>
+            <span>Subtotal</span>
             <span>{clp(accountTotal(a))}</span>
           </div>
           {a.paidAt && (
