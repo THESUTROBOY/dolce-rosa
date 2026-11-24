@@ -6,8 +6,8 @@ import { PAY_LABEL, STATION_LABEL, TURNO_LABEL } from './domain/types';
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const when = (iso: string) => new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
 
-const PAGE = `@page{size:80mm auto;margin:0}*{box-sizing:border-box}body{width:72mm;margin:0 auto;padding:3mm 0;font:12px/1.35 ui-monospace,Menlo,monospace;color:#000}
-h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}.r{display:flex;justify-content:space-between;gap:6px}.r span:first-child{flex:1}
+const PAGE = `@page{size:80mm auto;margin:0}*{box-sizing:border-box}body{width:68mm;margin:0 0 0 1mm;padding:3mm 3mm 3mm 0;font:12px/1.35 ui-monospace,Menlo,monospace;color:#000}
+h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}.r{display:flex;justify-content:space-between;gap:6px}.r span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}.r span:last-child{white-space:nowrap}
 .b{font-size:17px;font-weight:bold}hr{border:0;border-top:1px dashed #000;margin:6px 0}.n{padding-left:10px;font-style:italic}.s{font-size:11px}`;
 
 export function accountHtml(a: Account, s: Settings) {
