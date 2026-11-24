@@ -84,7 +84,7 @@ export function SyncAdmin() {
         </>
       )}
 
-      {cfg && info.status === 'sin-sesion' && (
+      {cfg && !info.email && info.status !== 'apagada' && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -102,6 +102,20 @@ export function SyncAdmin() {
           </label>
           <button className="btn-primary wide" disabled={busy || !email || !password}>
             {busy ? 'Conectando…' : 'Iniciar sesión'}
+          </button>
+          <p className="hint">¿Primera vez? Crea la cuenta del local con un correo y una contraseña (mínimo 6 caracteres) y úsala después en todos los equipos.</p>
+          <button
+            type="button"
+            className="btn-secondary wide"
+            disabled={busy || !email || password.length < 6}
+            onClick={() =>
+              act(async () => {
+                const ok = await sync.signUp(email, password);
+                toast(ok ? 'Cuenta creada y equipo conectado' : 'Cuenta creada: confirma el correo y luego inicia sesión');
+              })
+            }
+          >
+            Crear la cuenta del local
           </button>
         </form>
       )}

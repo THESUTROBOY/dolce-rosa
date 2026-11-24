@@ -37,6 +37,14 @@ const CONFIG_KEY = 'dolce-rosa:sync-config';
 const PENDING_KEY = 'dolce-rosa:sync-pendiente';
 const DEVICE_KEY = 'dolce-rosa:equipo';
 
+function authMessage(m: string) {
+  if (m === 'Invalid login credentials') return 'Correo o contraseña incorrectos (o la cuenta aún no existe: créala abajo)';
+  if (/not confirmed/i.test(m)) return 'Falta confirmar el correo: abre el enlace que llegó al correo de la cuenta del local';
+  if (/already registered/i.test(m)) return 'Esa cuenta ya existe: usa Iniciar sesión';
+  if (/at least 6/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres';
+  return m;
+}
+
 export function syncConfig(): { url: string; key: string } | null {
   const env = import.meta.env as Record<string, string | undefined>;
   if (env.VITE_SUPABASE_URL && env.VITE_SUPABASE_KEY) return { url: env.VITE_SUPABASE_URL, key: env.VITE_SUPABASE_KEY };
@@ -164,8 +172,18 @@ class Sync {
   async signIn(email: string, password: string) {
     if (!this.client) throw new Error('Primero configura la conexión');
     const { data, error } = await this.client.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Correo o contraseña incorrectos' : error.message);
+    if (error) throw new Error(authMessage(error.message));
     await this.connect(data.user.email ?? email);
+  }
+
+  /** Crea la cuenta del local desde la app (una sola vez). Devuelve true si quedó conectada. */
+  async signUp(email: string, password: string): Promise<boolean> {
+    if (!this.client) throw new Error('Primero configura la conexión');
+    const { data, error } = await this.client.auth.signUp({ email, password });
+    if (error) throw new Error(authMessage(error.message));
+    if (!data.session) return false; // Supabase pide confirmar el correo primero.
+    await this.connect(data.user?.email ?? email);
+    return true;
   }
 
   async signOut() {

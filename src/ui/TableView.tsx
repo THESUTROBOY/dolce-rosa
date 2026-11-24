@@ -397,7 +397,7 @@ function SendSheet({ account, onClose }: { account: Account; onClose(): void }) 
             const before = new Set(store.get().comandas.map((c) => c.id));
             const r = run(() => store.send(account.id));
             if (!r) return;
-            if (canPrint && store.get().settings.printOnSend !== false) {
+            if (canPrint && store.get().settings.printOnSend === true) {
               const fresh = store.get().comandas.filter((c) => !before.has(c.id));
               if (fresh.length) printHtml(fresh.map((c) => comandaHtml(c)).join('<div style="break-after:page"></div>'));
             }
