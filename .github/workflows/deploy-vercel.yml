@@ -22,6 +22,8 @@ env:
   # pública por diseño: la protección real son las políticas RLS y el login.
   VITE_SUPABASE_URL: https://ozaxfwgaoeffrlsiqsiu.supabase.co
   VITE_SUPABASE_KEY: sb_publishable_o5LuIDmMs5e7sR7X-NdD3Q_rhFC169P
+  # Equipos nuevos parten sin datos de prueba (solo carta y mesas).
+  VITE_START_EMPTY: '1'
   TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
 
 jobs:

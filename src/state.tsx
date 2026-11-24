@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, useSyncExt
 import { demoState } from './domain/demo';
 import { DomainError, Store } from './domain/store';
 import { idbPersistence } from './persist';
+import { seedState } from './domain/seed';
 import { startSync } from './sync';
 import { dayKey, turnoOf } from './domain/calc';
 import type { AppState } from './domain/types';
@@ -11,7 +12,10 @@ const StoreCtx = createContext<Store>(null!);
 
 /** Abre los datos guardados en este equipo y, si está configurada, la sincronización. */
 export async function boot() {
-  store = new Store(await idbPersistence('dolce-rosa:v8', 'dolce-rosa:v7'), () => demoState());
+  // En el local (VITE_START_EMPTY=1) un equipo nuevo parte con la carta y las mesas, sin movimientos.
+  // En la versión de prueba parte con datos de ejemplo.
+  const startEmpty = (import.meta.env as Record<string, string | undefined>).VITE_START_EMPTY === '1';
+  store = new Store(await idbPersistence('dolce-rosa:v8', 'dolce-rosa:v7'), () => (startEmpty ? seedState() : demoState()));
   startSync(store);
 }
 
