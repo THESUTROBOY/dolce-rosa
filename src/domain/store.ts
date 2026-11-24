@@ -54,8 +54,11 @@ export function migrate(raw: unknown): AppState | null {
   s.counts ??= [];
   s.closes ??= [];
   s.ledgerHistory ??= [];
-  s.staff ??= [{ id: 'staff_admin', name: 'Administración', role: 'admin', pin: s.settings.adminPin || '1234', active: true }];
+  s.staff ??= [{ id: 'staff_admin', name: 'Administración', role: 'admin', pin: s.settings.adminPin || '0310', active: true }];
   const st = s.settings;
+  // El PIN de fábrica pasó de 1234 a 0310 (nov 2026): se actualiza donde seguía el antiguo.
+  if (st.adminPin === '1234') st.adminPin = '0310';
+  for (const p of s.staff) if (p.role === 'admin' && p.pin === '1234') p.pin = '0310';
   st.fees ??= { ...DEFAULT_FEES };
   st.settleDays ??= { ...DEFAULT_SETTLE_DAYS };
   st.openingCash ??= 0;
